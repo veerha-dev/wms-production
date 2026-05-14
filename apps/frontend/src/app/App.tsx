@@ -34,6 +34,8 @@ import SalesOrdersPage from "@/features/outbound/pages/SalesOrdersPage";
 import PickListsPage from "@/features/outbound/pages/PickListsPage";
 import PackingPage from "@/features/outbound/pages/PackingPage";
 import ShipmentsPage from "@/features/outbound/pages/ShipmentsPage";
+import WavePlanningPage from "@/features/outbound/pages/WavePlanningPage";
+import ConsolidationPage from "@/features/outbound/pages/ConsolidationPage";
 // Inbound
 import PurchaseOrdersPage from "@/features/inbound/pages/PurchaseOrdersPage";
 import GRNPage from "@/features/inbound/pages/GRNPage";
@@ -130,6 +132,8 @@ const App = () => (
             <Route path="/outbound/picking" element={<ProtectedLayout><PickListsPage /></ProtectedLayout>} />
             <Route path="/outbound/packing" element={<ProtectedLayout><PackingPage /></ProtectedLayout>} />
             <Route path="/outbound/shipping" element={<ProtectedLayout><ShipmentsPage /></ProtectedLayout>} />
+            <Route path="/outbound/waves" element={<ProtectedLayout><WavePlanningPage /></ProtectedLayout>} />
+            <Route path="/outbound/consolidation" element={<ProtectedLayout><ConsolidationPage /></ProtectedLayout>} />
             <Route path="/returns" element={<ProtectedLayout><ReturnsPage /></ProtectedLayout>} />
             
             <Route path="/reports" element={<ProtectedLayout><ReportsPage /></ProtectedLayout>} />

@@ -55,6 +55,8 @@ const navItems = [
   { id: 'putaway', name: 'Putaway', icon: PackageOpen, path: '/inbound/putaway', section: 'inbound' },
   { id: 'outbound', name: 'Sales Orders', icon: ArrowUpFromLine, path: '/outbound', section: 'outbound' },
   { id: 'picking', name: 'Pick Lists', icon: ListChecks, path: '/outbound/picking', section: 'outbound' },
+  { id: 'waves', name: 'Wave Planning', icon: Workflow, path: '/outbound/waves', section: 'outbound' },
+  { id: 'consolidation', name: 'Consolidation', icon: Boxes, path: '/outbound/consolidation', section: 'outbound' },
   { id: 'packing', name: 'Packing', icon: PackageCheck, path: '/outbound/packing', section: 'outbound' },
   { id: 'shipping', name: 'Shipments', icon: Truck, path: '/outbound/shipping', section: 'outbound' },
   { id: 'returns', name: 'Returns', icon: RotateCcw, path: '/returns', section: 'operations' },

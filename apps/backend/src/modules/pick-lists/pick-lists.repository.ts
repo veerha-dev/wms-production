@@ -67,6 +67,7 @@ export class PickListsRepository {
       skuId: r.sku_id, skuCode: r.sku_code, skuName: r.sku_name,
       binId: r.bin_id, binCode: r.bin_code,
       soId: r.so_id, soNumber: r.item_so_number,
+      toteCode: r.tote_code,
       quantityRequired: parseInt(r.quantity_required, 10),
       quantityPicked: parseInt(r.quantity_picked, 10),
       status: r.status,
@@ -99,12 +100,20 @@ export class PickListsRepository {
     const params: any[] = [];
     let idx = 1;
     for (const item of items) {
-      values.push(`($${idx},$${idx+1},$${idx+2},$${idx+3},$${idx+4})`);
-      params.push(pickListId, item.skuId, item.binId || null, item.quantityRequired, item.soId || null);
-      idx += 5;
+      values.push(`($${idx},$${idx+1},$${idx+2},$${idx+3},$${idx+4},$${idx+5})`);
+      params.push(
+        pickListId,
+        item.skuId,
+        item.binId || null,
+        item.quantityRequired,
+        item.soId || null,
+        item.toteCode || null,
+      );
+      idx += 6;
     }
     await this.db.query(
-      `INSERT INTO pick_list_items (pick_list_id, sku_id, bin_id, quantity_required, so_id) VALUES ${values.join(',')}`,
+      `INSERT INTO pick_list_items (pick_list_id, sku_id, bin_id, quantity_required, so_id, tote_code)
+       VALUES ${values.join(',')}`,
       params,
     );
   }

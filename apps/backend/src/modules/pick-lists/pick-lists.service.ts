@@ -65,12 +65,24 @@ export class PickListsService {
       status: assignedTo ? 'assigned' : 'pending',
     });
 
+    // Batch picking: assign a tote per SO (Tote A, Tote B, ...). This lets the picker walk once
+    // and drop items into the correct slot for each order (PDF §3.3 Batch Picking).
+    const toteForSo: Record<string, string | null> = {};
+    if (strategy === 'batch') {
+      const uniqueSoIds = Array.from(new Set(soItems.map((it) => it.soId)));
+      uniqueSoIds.forEach((soId, idx) => {
+        toteForSo[soId] = `Tote ${toteCodeForIndex(idx)}`;
+      });
+    }
+
     // 4. Allocate items — find bins with stock for each SKU
     const pickItems: any[] = [];
 
     for (const soItem of soItems) {
       const qtyNeeded = soItem.quantityOrdered - soItem.quantityPicked;
       if (qtyNeeded <= 0) continue;
+
+      const toteCode = toteForSo[soItem.soId] ?? null;
 
       // Find bins with available stock, ordered by proximity
       const bins = await this.repository.findAvailableStock(getCurrentTenantId(), soItem.skuId, warehouseId);
@@ -84,6 +96,7 @@ export class PickListsService {
           binId: bin.binId,
           quantityRequired: pickQty,
           soId: soItem.soId,
+          toteCode,
         });
         remaining -= pickQty;
       }
@@ -95,6 +108,7 @@ export class PickListsService {
           binId: null,
           quantityRequired: remaining,
           soId: soItem.soId,
+          toteCode,
         });
       }
     }
@@ -141,4 +155,18 @@ export class PickListsService {
     const count = await this.repository.countByTenant(getCurrentTenantId());
     return `PL-${String(count + 1).padStart(3, '0')}`;
   }
+}
+
+/**
+ * Map a zero-based index to a tote label: 0 → A, 25 → Z, 26 → AA, ...
+ * Matches the PDF example: SO-001 = Tote A, SO-002 = Tote B.
+ */
+function toteCodeForIndex(idx: number): string {
+  let n = idx;
+  let out = '';
+  do {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
 }

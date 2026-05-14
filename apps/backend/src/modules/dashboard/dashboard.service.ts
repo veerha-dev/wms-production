@@ -34,6 +34,7 @@ export class DashboardService {
       this.db.query(`SELECT COUNT(*) as c FROM qc_inspections qi JOIN grn g ON qi.grn_id = g.id WHERE g.warehouse_id = $1 AND g.tenant_id = $2 AND qi.status = 'pending'`, [warehouseId, tid]),
       this.db.query(`SELECT COUNT(*) as c FROM putaway_tasks WHERE warehouse_id = $1 AND tenant_id = $2 AND status IN ('pending','assigned')`, [warehouseId, tid]),
       this.db.query(`SELECT u.id, u.full_name, u.is_active, u.last_login, u.role,
+        u.presence_status, u.last_heartbeat_at,
         t.id as task_id, t.task_number, t.task_type as task_type
         FROM users u LEFT JOIN tasks t ON t.assigned_to = u.id AND t.status = 'in_progress'
         WHERE u.warehouse_id = $1 AND u.tenant_id = $2 AND u.role IN ('worker','manager') ORDER BY u.full_name`, [warehouseId, tid]),
@@ -74,12 +75,29 @@ export class DashboardService {
     const hour = new Date().getHours();
     const shift = hour < 14 ? 'Morning Shift' : hour < 22 ? 'Afternoon Shift' : 'Night Shift';
 
-    const workers = workersList.rows.map((w: any) => ({
-      id: w.id, name: w.full_name, role: w.role,
-      status: w.task_id ? 'active' : (w.is_active ? 'idle' : 'absent'),
-      currentTask: w.task_id ? { id: w.task_id, taskNumber: w.task_number, type: w.task_type } : null,
-      lastActivity: w.last_login,
-    }));
+    const workers = workersList.rows.map((w: any) => {
+      // Prefer real-time presence over the simple "has-task" heuristic.
+      // active = working a task or recently heartbeated
+      // idle = logged in but no heartbeat for 5+ min
+      // break = explicitly set 'break'
+      // absent = deactivated or never seen
+      let status: 'active' | 'idle' | 'break' | 'absent';
+      if (!w.is_active) status = 'absent';
+      else if (w.presence_status === 'break') status = 'break';
+      else if (w.presence_status === 'idle') status = 'idle';
+      else if (w.presence_status === 'active' || w.task_id) status = 'active';
+      else status = 'idle';
+
+      return {
+        id: w.id,
+        name: w.full_name,
+        role: w.role,
+        status,
+        presenceStatus: w.presence_status || 'offline',
+        currentTask: w.task_id ? { id: w.task_id, taskNumber: w.task_number, type: w.task_type } : null,
+        lastActivity: w.last_heartbeat_at || w.last_login,
+      };
+    });
 
     return {
       warehouse: { id: wh.id, name: wh.name || 'Warehouse', type: wh.type || '', totalCapacity: parseInt(wh.total_capacity || 0), currentOccupancy: parseInt(wh.current_occupancy || 0), city: wh.city || '' },

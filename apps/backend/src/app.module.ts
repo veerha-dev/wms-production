@@ -38,6 +38,9 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { EmailModule } from './modules/email/email.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { PackConsolidationModule } from './modules/pack-consolidation/pack-consolidation.module';
+import { PickWavesModule } from './modules/pick-waves/pick-waves.module';
+import { PresenceModule } from './modules/presence/presence.module';
 
 @Module({
   imports: [
@@ -82,6 +85,9 @@ import { AuditModule } from './modules/audit/audit.module';
     SettingsModule,
     OnboardingModule,
     AuditModule,
+    PackConsolidationModule,
+    PickWavesModule,
+    PresenceModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -409,6 +409,7 @@ function PickingExecutionDialog({ pickListId, open, onOpenChange }: any) {
                   <TableHead>Bin</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Order</TableHead>
+                  <TableHead>Tote</TableHead>
                   <TableHead>Required</TableHead>
                   <TableHead>Picked</TableHead>
                   <TableHead>Status</TableHead>
@@ -466,7 +467,14 @@ function PickListItemRow({ item, isPending, isCompleted, onRecordPick }: any) {
           <p className="text-sm text-muted-foreground">{item.sku?.name || item.skus?.name || '-'}</p>
         </div>
       </TableCell>
-      <TableCell className="text-sm">{item.salesOrder?.orderNumber || item.salesOrder?.soNumber || item.sales_order_items?.sales_orders?.order_number || '-'}</TableCell>
+      <TableCell className="text-sm">{item.salesOrder?.orderNumber || item.salesOrder?.soNumber || item.soNumber || item.sales_order_items?.sales_orders?.order_number || '-'}</TableCell>
+      <TableCell>
+        {item.toteCode ? (
+          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">{item.toteCode}</Badge>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        )}
+      </TableCell>
       <TableCell>{item.quantityRequired || item.required_quantity || 0}</TableCell>
       <TableCell>
         <Input
