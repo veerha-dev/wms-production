@@ -174,7 +174,33 @@ function safeTenantId(): string | null {
   }
 }
 
-const SENSITIVE_KEYS = ['password', 'currentPassword', 'newPassword', 'tempPassword', 'temporaryPassword', 'passwordHash', 'access_token', 'refresh_token', 'accessToken', 'refreshToken', 'authorization'];
+// A key is sensitive when one of these words is the LAST token of the key
+// (after splitting on camelCase boundaries and underscores), or is the whole key.
+// This catches "password", "newPassword", "adminToken", "client_secret"
+// but NOT "passwordMinLength" (last word "length") or "tokenVersion" (last word "version").
+const SENSITIVE_LAST_WORDS = new Set([
+  'password', 'passwords',
+  'token', 'tokens',
+  'secret', 'secrets',
+  'authorization',
+  'cookie', 'cookies',
+]);
+
+// Compound keys that are always sensitive regardless of word position.
+// "passwordHash" tokenizes to [password, hash] — last word "hash" wouldn't match,
+// but the hash itself is sensitive, so we list it explicitly.
+const SENSITIVE_EXACT_KEYS = new Set([
+  'passwordhash', 'password_hash',
+  'apikey', 'api_key',
+]);
+
+function isSensitiveKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  if (SENSITIVE_EXACT_KEYS.has(lower)) return true;
+  const words = key.split(/(?=[A-Z])|_/).map((s) => s.toLowerCase()).filter(Boolean);
+  if (words.length === 0) return false;
+  return SENSITIVE_LAST_WORDS.has(words[words.length - 1]);
+}
 
 function redact(obj: any, depth = 0): any {
   if (depth > 4 || obj == null) return obj;
@@ -182,7 +208,7 @@ function redact(obj: any, depth = 0): any {
   if (typeof obj === 'object') {
     const out: any = {};
     for (const [k, v] of Object.entries(obj)) {
-      if (SENSITIVE_KEYS.some((s) => k.toLowerCase().includes(s.toLowerCase()))) {
+      if (isSensitiveKey(k)) {
         out[k] = '[redacted]';
       } else {
         out[k] = redact(v, depth + 1);
