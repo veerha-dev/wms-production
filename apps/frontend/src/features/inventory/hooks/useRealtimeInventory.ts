@@ -14,7 +14,8 @@ export function useRealtimeInventory(params?: Record<string, any>) {
     if (!isAuthenticated || !tenant?.id) return;
 
     // Connect to WebSocket
-    socketRef.current = io('http://localhost:3000/inventory', {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    socketRef.current = io(`${API_BASE_URL}/inventory`, {
       withCredentials: true,
     });
 

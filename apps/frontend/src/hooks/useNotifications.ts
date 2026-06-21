@@ -19,7 +19,8 @@ export function useNotifications() {
 
   useEffect(() => {
     // Connect to notification WebSocket
-    socketRef.current = io('http://localhost:3000/notifications', {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    socketRef.current = io(`${API_BASE_URL}/notifications`, {
       withCredentials: true,
     });
 
