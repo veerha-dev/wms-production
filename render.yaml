@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: veerha-wms-backend
+    runtime: docker
+    dockerfilePath: apps/backend/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        sync: false # Prompt user for Neon database URL
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: JWT_SECRET
+        generateValue: true # Render will automatically generate a secure random secret key
+      - key: JWT_REFRESH_SECRET
+        generateValue: true # Render will automatically generate a secure random secret key
+      - key: CORS_ORIGIN
+        value: "*" # Allow all origins by default (you can restrict this to your frontend URL later)

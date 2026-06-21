@@ -244,6 +244,7 @@ export default function SalesOrdersPage() {
 }
 
 function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
+  const { toast } = useToast();
   const [formData, setFormData] = useState({
     customer_name: '',
     customer_code: '',
@@ -281,6 +282,21 @@ function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
 
   const handleSubmit = () => {
     if (!formData.customer_name || !formData.warehouse_id || formData.items.length === 0) {
+      toast({
+        title: 'Missing Required Fields',
+        description: 'Please enter a customer name, select a warehouse, and add at least one item.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const hasEmptySku = formData.items.some(item => !item.sku_id);
+    if (hasEmptySku) {
+      toast({
+        title: 'Invalid Order Items',
+        description: 'Please select an SKU for all order items.',
+        variant: 'destructive',
+      });
       return;
     }
     onSubmit(formData);

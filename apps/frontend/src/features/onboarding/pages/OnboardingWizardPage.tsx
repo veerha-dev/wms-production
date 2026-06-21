@@ -5,6 +5,7 @@ import { Button } from '@/shared/components/ui/button';
 import { Card } from '@/shared/components/ui/card';
 import { useToast } from '@/shared/components/ui/use-toast';
 import { useAuth } from '@/shared/contexts/AuthContext';
+import { api } from '@/shared/lib/api';
 import { onboardingApi } from '../api/onboarding.api';
 import { useOnboardingStatus } from '../hooks/useOnboardingStatus';
 import { WarehouseStep } from '../components/WarehouseStep';
@@ -49,6 +50,22 @@ export default function OnboardingWizardPage() {
       team: !!status?.hasInvitedUsers,
     };
   }, [status]);
+
+  // Auto-fetch the first warehouse ID if a warehouse exists for this tenant
+  useEffect(() => {
+    if (status?.hasWarehouse && !warehouseId) {
+      api.get('/api/v1/warehouses', { params: { limit: 1 } })
+        .then((res) => {
+          const list = res.data?.data || [];
+          if (list.length > 0) {
+            setWarehouseId(list[0].id);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to auto-fetch warehouse for onboarding:', err);
+        });
+    }
+  }, [status?.hasWarehouse, warehouseId]);
 
   // If everything is done OR onboarding marked complete, send admin to dashboard
   useEffect(() => {
@@ -111,8 +128,8 @@ export default function OnboardingWizardPage() {
   const step = STEPS[currentStep];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted/30 py-8 px-4">
-      <div className="mx-auto max-w-4xl">
+    <div className="min-h-screen bg-gradient-to-br from-background to-muted/30 py-8 px-4 md:px-8">
+      <div className="mx-auto max-w-7xl w-full">
         {/* Header */}
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>

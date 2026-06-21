@@ -233,6 +233,7 @@ export default function PurchaseOrdersPage() {
 }
 
 function CreatePODialog({ open, onOpenChange, onSubmit }: any) {
+  const { toast } = useToast();
   const [formData, setFormData] = useState({
     supplierId: '',
     warehouseId: '',
@@ -267,6 +268,21 @@ function CreatePODialog({ open, onOpenChange, onSubmit }: any) {
 
   const handleSubmit = () => {
     if (!formData.supplierId || !formData.warehouseId || formData.items.length === 0) {
+      toast({
+        title: 'Missing Required Fields',
+        description: 'Please select a supplier, warehouse, and add at least one line item.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const hasEmptySku = formData.items.some(item => !item.skuId);
+    if (hasEmptySku) {
+      toast({
+        title: 'Invalid Line Items',
+        description: 'Please select an SKU for all line items.',
+        variant: 'destructive',
+      });
       return;
     }
     
