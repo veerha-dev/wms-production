@@ -65,10 +65,10 @@ export class PurchaseOrdersRepository {
     return this.db.transaction(async (client) => {
       // Insert PO header
       const poRes = await client.query(
-        `INSERT INTO purchase_orders (tenant_id, po_number, supplier_id, warehouse_id, status, expected_date, total_amount, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        `INSERT INTO purchase_orders (tenant_id, po_number, supplier_id, warehouse_id, status, expected_date, total_amount, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
         [tenantId, dto.poNumber, dto.supplierId || dto.supplier_id, dto.warehouseId || dto.warehouse_id,
-         'draft', dto.expectedDate || dto.expected_date || null, dto.totalAmount || dto.total_amount || 0, dto.notes || null],
+         'draft', dto.expectedDate || dto.expected_date || null, dto.totalAmount || dto.total_amount || 0, dto.notes || null, dto.createdBy || dto.created_by || null],
       );
       const po = poRes.rows[0];
 
@@ -138,6 +138,14 @@ export class PurchaseOrdersRepository {
     }
     params.push(id, tenantId);
     const res = await this.db.query(`UPDATE purchase_orders SET ${sets.join(', ')} WHERE id = $${idx} AND tenant_id = $${idx + 1} RETURNING *`, params);
+    return res.rows[0] || null;
+  }
+
+  async getApprovalRule(tenantId: string, moduleName: string): Promise<any> {
+    const res = await this.db.query(
+      `SELECT * FROM approval_rules WHERE tenant_id = $1 AND module = $2`,
+      [tenantId, moduleName],
+    );
     return res.rows[0] || null;
   }
 }

@@ -7,7 +7,12 @@ import {
   Body,
   Param,
   Query,
+  UseGuards,
+  Req,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import {
   CreatePurchaseOrderDto,
@@ -16,6 +21,7 @@ import {
 } from './dto';
 
 @Controller('api/v1/purchase-orders')
+@UseGuards(JwtAuthGuard)
 export class PurchaseOrdersController {
   constructor(
     private readonly purchaseOrdersService: PurchaseOrdersService,
@@ -44,8 +50,8 @@ export class PurchaseOrdersController {
   }
 
   @Post()
-  async create(@Body() dto: CreatePurchaseOrderDto) {
-    const data = await this.purchaseOrdersService.create(dto);
+  async create(@Body() dto: CreatePurchaseOrderDto, @Req() req: any) {
+    const data = await this.purchaseOrdersService.create(dto, req.user);
     return { success: true, data };
   }
 
@@ -65,21 +71,39 @@ export class PurchaseOrdersController {
   }
 
   @Post(':id/submit')
-  async submit(@Param('id') id: string) {
-    const data = await this.purchaseOrdersService.submit(id);
+  @HttpCode(HttpStatus.OK)
+  async submit(@Param('id') id: string, @Req() req: any) {
+    const data = await this.purchaseOrdersService.submit(id, req.user);
     return { success: true, data };
   }
 
   @Post(':id/approve')
-  async approve(
+  @HttpCode(HttpStatus.OK)
+  async approve(@Param('id') id: string, @Req() req: any) {
+    const data = await this.purchaseOrdersService.approve(id, req.user);
+    return { success: true, data };
+  }
+
+  @Post(':id/reject')
+  @HttpCode(HttpStatus.OK)
+  async reject(
     @Param('id') id: string,
-    @Body('approved_by') approvedBy?: string,
+    @Body('reason') reason: string,
+    @Req() req: any,
   ) {
-    const data = await this.purchaseOrdersService.approve(id, approvedBy);
+    const data = await this.purchaseOrdersService.reject(id, reason, req.user);
+    return { success: true, data };
+  }
+
+  @Post(':id/recall')
+  @HttpCode(HttpStatus.OK)
+  async recall(@Param('id') id: string, @Req() req: any) {
+    const data = await this.purchaseOrdersService.recall(id, req.user);
     return { success: true, data };
   }
 
   @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
   async cancel(@Param('id') id: string) {
     const data = await this.purchaseOrdersService.cancel(id);
     return { success: true, data };

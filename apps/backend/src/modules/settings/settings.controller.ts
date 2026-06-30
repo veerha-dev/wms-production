@@ -104,4 +104,28 @@ export class SettingsController {
     await this.service.sendTestNotification(getCurrentTenantId());
     return { success: true, message: 'Test notification sent' };
   }
+
+  // ─── Tenant Approval Rules ──────────────────────────────────────────────────
+
+  @Get('approval-rules')
+  async getApprovalRules() {
+    const data = await this.service.getApprovalRules(getCurrentTenantId());
+    return { success: true, data };
+  }
+
+  @Patch('approval-rules/:module')
+  async updateApprovalRule(
+    @Request() req: any,
+    @Param('module') module: string,
+    @Body() body: { thresholdAmount: number; isActive: boolean },
+  ) {
+    if (req.user.role !== 'admin') throw new ForbiddenException('Only admins can update approval rules');
+    const data = await this.service.updateApprovalRule(
+      getCurrentTenantId(),
+      module,
+      body.thresholdAmount,
+      body.isActive,
+    );
+    return { success: true, data };
+  }
 }

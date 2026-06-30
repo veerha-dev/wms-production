@@ -82,3 +82,36 @@ export function usePOStats(params?: Record<string, any>) {
 export const useCreatePO = useCreatePurchaseOrder;
 export const useApprovePO = useApprovePurchaseOrder;
 export const useCancelPO = useCancelPurchaseOrder;
+
+export function useRejectPurchaseOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => { 
+      const { data } = await api.post(`/api/v1/purchase-orders/${id}/reject`, { reason }); 
+      return data.data; 
+    },
+    onSuccess: () => { 
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }); 
+      toast.success('Purchase order rejected'); 
+    },
+    onError: (e: any) => toast.error(`Failed: ${e.response?.data?.error?.message || e.message}`),
+  });
+}
+
+export function useRecallPurchaseOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => { 
+      const { data } = await api.post(`/api/v1/purchase-orders/${id}/recall`); 
+      return data.data; 
+    },
+    onSuccess: () => { 
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }); 
+      toast.success('Purchase order recalled to draft'); 
+    },
+    onError: (e: any) => toast.error(`Failed: ${e.response?.data?.error?.message || e.message}`),
+  });
+}
+
+export const useRejectPO = useRejectPurchaseOrder;
+export const useRecallPO = useRecallPurchaseOrder;

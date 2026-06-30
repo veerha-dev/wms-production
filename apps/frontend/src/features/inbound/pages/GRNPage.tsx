@@ -15,6 +15,7 @@ import { usePurchaseOrders } from '@/features/inbound/hooks/usePurchaseOrders';
 import { useWarehouses } from '@/features/warehouse/hooks/useWarehouses';
 import { useBins } from '@/features/warehouse/hooks/useBins';
 import { safeParseInt } from '@/shared/utils/input';
+import { cn } from '@/shared/lib/utils';
 
 export default function GRNPage() {
   const { toast } = useToast();
@@ -30,16 +31,19 @@ export default function GRNPage() {
   });
 
   const getStatusBadge = (status: string) => {
-    const variants: Record<string, { variant: any; icon: any }> = {
-      draft: { variant: 'secondary', icon: Clock },
-      in_progress: { variant: 'default', icon: Package },
-      completed: { variant: 'default', icon: CheckCircle },
-      cancelled: { variant: 'destructive', icon: AlertCircle },
+    const variants: Record<string, { variant: any; icon: any; className?: string }> = {
+      draft: { variant: 'secondary', icon: Clock, className: 'bg-slate-100 text-slate-700 border-slate-200' },
+      submitted: { variant: 'default', icon: Clock, className: 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100' },
+      in_progress: { variant: 'default', icon: Package, className: 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100' },
+      completed: { variant: 'default', icon: CheckCircle, className: 'bg-green-100 text-green-700 border-green-200 hover:bg-green-100' },
+      approved: { variant: 'default', icon: CheckCircle, className: 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100' },
+      cancelled: { variant: 'destructive', icon: AlertCircle, className: 'bg-rose-100 text-rose-700 border-rose-200 hover:bg-rose-100' },
+      rejected: { variant: 'destructive', icon: AlertCircle, className: 'bg-rose-100 text-rose-700 border-rose-200 hover:bg-rose-100' },
     };
     const config = variants[status] || variants.draft;
     const Icon = config.icon;
     return (
-      <Badge variant={config.variant} className="gap-1">
+      <Badge variant={config.variant} className={cn("gap-1 font-medium px-2 py-0.5 rounded-full border", config.className)}>
         <Icon className="h-3 w-3" />
         {status.replace(/_/g, ' ')}
       </Badge>

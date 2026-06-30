@@ -281,6 +281,63 @@ export class SettingsService {
       [tenantId],
     );
   }
+
+  // ─── Approval Rules ─────────────────────────────────────────────────────────
+
+  async getApprovalRules(tenantId: string) {
+    const res = await this.db.query(
+      `SELECT * FROM approval_rules WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    return res.rows.map(row => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      module: row.module,
+      thresholdAmount: Number(row.threshold_amount || 0),
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  async getApprovalRule(tenantId: string, module: string) {
+    const res = await this.db.query(
+      `SELECT * FROM approval_rules WHERE tenant_id = $1 AND module = $2`,
+      [tenantId, module],
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      module: row.module,
+      thresholdAmount: Number(row.threshold_amount || 0),
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  async updateApprovalRule(tenantId: string, module: string, thresholdAmount: number, isActive: boolean) {
+    const res = await this.db.query(
+      `INSERT INTO approval_rules (tenant_id, module, threshold_amount, is_active)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (tenant_id, module) 
+       DO UPDATE SET threshold_amount = $3, is_active = $4, updated_at = NOW()
+       RETURNING *`,
+      [tenantId, module, thresholdAmount, isActive],
+    );
+    const row = res.rows[0];
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      module: row.module,
+      thresholdAmount: Number(row.threshold_amount || 0),
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
 }
 
 function mapPolicy(row: any) {

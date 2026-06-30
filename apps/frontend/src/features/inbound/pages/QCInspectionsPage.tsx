@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui
 import { Checkbox } from '@/shared/components/ui/checkbox';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useQCInspections, useQCInspection, usePendingQCInspections, useStartInspection, useCompleteInspection, useAddDefect } from '@/features/inbound/hooks/useQCInspections';
+import { cn } from '@/shared/lib/utils';
 
 export default function QCInspectionsPage() {
   const { toast } = useToast();
@@ -30,17 +31,17 @@ export default function QCInspectionsPage() {
   const { data: pendingInspections } = usePendingQCInspections();
 
   const getStatusBadge = (status: string) => {
-    const variants: Record<string, { variant: any; icon: any; color: string }> = {
-      pending: { variant: 'secondary', icon: Clock, color: 'text-yellow-600' },
-      in_progress: { variant: 'default', icon: ClipboardCheck, color: 'text-blue-600' },
-      passed: { variant: 'default', icon: CheckCircle, color: 'text-green-600' },
-      failed: { variant: 'destructive', icon: XCircle, color: 'text-red-600' },
-      conditional_pass: { variant: 'default', icon: AlertTriangle, color: 'text-orange-600' },
+    const variants: Record<string, { variant: any; icon: any; className?: string }> = {
+      pending: { variant: 'secondary', icon: Clock, className: 'bg-slate-100 text-slate-700 border-slate-200' },
+      in_progress: { variant: 'default', icon: ClipboardCheck, className: 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100' },
+      passed: { variant: 'default', icon: CheckCircle, className: 'bg-green-100 text-green-700 border-green-200 hover:bg-green-100' },
+      failed: { variant: 'destructive', icon: XCircle, className: 'bg-rose-100 text-rose-700 border-rose-200 hover:bg-rose-100' },
+      conditional_pass: { variant: 'default', icon: AlertTriangle, className: 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100' },
     };
     const config = variants[status] || variants.pending;
     const Icon = config.icon;
     return (
-      <Badge variant={config.variant} className="gap-1">
+      <Badge variant={config.variant} className={cn("gap-1 font-medium px-2 py-0.5 rounded-full border", config.className)}>
         <Icon className="h-3 w-3" />
         {status.replace(/_/g, ' ')}
       </Badge>

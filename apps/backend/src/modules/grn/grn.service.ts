@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { GrnRepository } from './grn.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { InvoicesService } from '../invoices/invoices.service';
+import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 
 interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
@@ -12,6 +13,7 @@ export class GrnService {
   constructor(
     private repository: GrnRepository,
     private invoices: InvoicesService,
+    private purchaseOrders: PurchaseOrdersService,
   ) {}
 
 
@@ -69,6 +71,16 @@ export class GrnService {
         // Don't fail the GRN status update if invoice creation has a non-fatal issue.
         // The user can always re-trigger via POST /invoices/from-grn/:grnId.
         this.logger.error(`Auto-invoice from GRN ${id} failed`, err as Error);
+      }
+
+      // Update associated PO status to 'received'
+      if (before.poId) {
+        try {
+          await this.purchaseOrders.updateStatus(before.poId, 'received');
+          this.logger.log(`Updated associated PO ${before.poId} status to 'received'`);
+        } catch (err) {
+          this.logger.error(`Failed to update PO ${before.poId} status on GRN completion`, err as Error);
+        }
       }
     }
 
