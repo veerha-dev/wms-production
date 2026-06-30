@@ -212,9 +212,12 @@ export default function PurchaseOrdersPage() {
                       <TableCell>{po.supplier?.name || po.supplier_name || '-'}</TableCell>
                       <TableCell>{getStatusBadge(po.status)}</TableCell>
                       <TableCell>
-                        {(po.expectedDate || po.expected_delivery) 
-                          ? new Date(po.expectedDate || po.expected_delivery).toLocaleDateString('en-IN') 
-                          : '-'}
+                        {(() => {
+                          const rawDate = po.expectedDate || po.expected_delivery;
+                          if (!rawDate) return '-';
+                          const dateObj = new Date(rawDate);
+                          return isNaN(dateObj.getTime()) ? '-' : dateObj.toLocaleDateString('en-IN');
+                        })()}
                       </TableCell>
                       <TableCell className="font-medium text-slate-900">₹{Number(po.totalAmount || po.total_amount || 0).toFixed(2)}</TableCell>
                       <TableCell>{po._count?.items || po.items?.length || po.purchase_order_items?.[0]?.count || 0}</TableCell>
@@ -610,14 +613,24 @@ function PODetailDialog({ po, open, onOpenChange }: any) {
             </div>
             <div>
               <Label className="text-muted-foreground">Order Date</Label>
-              <p className="font-medium">{new Date(po.orderDate || po.order_date || po.created_at).toLocaleDateString('en-IN')}</p>
+              <p className="font-medium">
+                {(() => {
+                  const rawDate = po.orderDate || po.order_date || po.created_at || po.createdAt;
+                  if (!rawDate) return 'Not set';
+                  const dateObj = new Date(rawDate);
+                  return isNaN(dateObj.getTime()) ? 'Not set' : dateObj.toLocaleDateString('en-IN');
+                })()}
+              </p>
             </div>
             <div>
               <Label className="text-muted-foreground">Expected Delivery</Label>
               <p className="font-medium">
-                {(po.expectedDate || po.expected_delivery) 
-                  ? new Date(po.expectedDate || po.expected_delivery).toLocaleDateString('en-IN') 
-                  : 'Not set'}
+                {(() => {
+                  const rawDate = po.expectedDate || po.expected_delivery;
+                  if (!rawDate) return 'Not set';
+                  const dateObj = new Date(rawDate);
+                  return isNaN(dateObj.getTime()) ? 'Not set' : dateObj.toLocaleDateString('en-IN');
+                })()}
               </p>
             </div>
           </div>
