@@ -267,7 +267,7 @@ export class DashboardService {
         stack: error.stack,
       });
     }
-  } }
+  }
 
   async getInventoryOverview() {
     const result = await this.db.query(`
