@@ -623,15 +623,23 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
   const createAdjustment = async (adjustment: Omit<StockAdjustment, 'id' | 'adjustmentNumber' | 'status' | 'requestedAt'>): Promise<StockAdjustment> => {
     const sku = skus.find(s => s.code === adjustment.skuCode);
+    
+    let type = 'correction';
+    if (adjustment.reasonCategory === 'damage') {
+      type = 'damage';
+    } else if (adjustment.adjustmentQty > 0) {
+      type = 'increase';
+    } else if (adjustment.adjustmentQty < 0) {
+      type = 'decrease';
+    }
+
     await createAdjustmentMutation.mutateAsync({
+      type: type as any,
+      skuId: sku?.id || adjustment.skuId,
       warehouseId: adjustment.location,
-      reason: adjustment.reason || adjustment.adjustmentType,
-      items: [{
-        skuId: sku?.id || adjustment.skuId,
-        systemQty: adjustment.previousQty || adjustment.quantityBefore || 0,
-        physicalQty: adjustment.newQty || adjustment.quantityAfter || 0,
-        variance: (adjustment.newQty || adjustment.quantityAfter || 0) - (adjustment.previousQty || adjustment.quantityBefore || 0),
-      }],
+      quantity: Math.abs(adjustment.adjustmentQty),
+      reason: adjustment.reason || 'Stock adjustment',
+      notes: adjustment.reasonCategory || null,
     });
     return { ...adjustment, id: '', adjustmentNumber: '', status: 'pending', requestedAt: new Date() } as StockAdjustment;
   };
