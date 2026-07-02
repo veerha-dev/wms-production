@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { SkusRepository } from '../skus/skus.repository';
 import { InventoryService } from '../inventory/inventory.service';
@@ -15,57 +15,6 @@ export class DashboardService {
     private skusRepository: SkusRepository,
     private inventoryService: InventoryService,
   ) {}
-
-  async debugDb(warehouseId?: string) {
-    const tid = getCurrentTenantId();
-    const tOnly = [tid];
-    const tAndWh = warehouseId ? [tid, warehouseId] : tOnly;
-    const whClause = warehouseId ? ' AND warehouse_id = $2' : '';
-
-    const results: any = {};
-    const queries = [
-      { name: 'skus', sql: 'SELECT COUNT(*) as c FROM skus WHERE tenant_id = $1', params: tOnly },
-      { name: 'warehouses', sql: `SELECT COUNT(*) as c FROM warehouses WHERE tenant_id = $1 AND status != 'inactive'`, params: tOnly },
-      { name: 'sales_orders', sql: `SELECT COUNT(*) as c FROM sales_orders WHERE tenant_id = $1 AND status NOT IN ('delivered','cancelled')${whClause}`, params: tAndWh },
-      { name: 'stock_levels', sql: `SELECT COALESCE(SUM(quantity_available), 0) as total FROM stock_levels WHERE tenant_id = $1${whClause}`, params: tAndWh },
-      { name: 'stock_movements', sql: `SELECT COUNT(*) as daily_movements FROM stock_movements WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE${whClause}`, params: tAndWh },
-      { name: 'returns', sql: `SELECT COUNT(*) as c FROM returns WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE`, params: tOnly },
-      { name: 'inventory_alerts', sql: `SELECT COUNT(*) as c FROM inventory_alerts WHERE tenant_id = $1 AND is_acknowledged = false`, params: tOnly },
-      { name: 'grn', sql: `SELECT COUNT(*) as c FROM grn WHERE tenant_id = $1 AND status = 'pending'${whClause}`, params: tAndWh },
-      { name: 'qc_inspections', sql: `SELECT COUNT(*) as c FROM qc_inspections qi JOIN grn g ON qi.grn_id = g.id WHERE g.tenant_id = $1 AND qi.status = 'pending'${warehouseId ? ' AND g.warehouse_id = $2' : ''}`, params: tAndWh },
-      { name: 'shipments', sql: `SELECT COUNT(*) as c FROM shipments sh JOIN sales_orders so ON sh.so_id = so.id WHERE sh.tenant_id = $1 AND sh.status = 'pending'${warehouseId ? ' AND so.warehouse_id = $2' : ''}`, params: tAndWh },
-      { name: 'tasks', sql: `SELECT COUNT(*) as c FROM tasks WHERE tenant_id = $1 AND status NOT IN ('completed','cancelled')${whClause}`, params: tAndWh }
-    ];
-
-    for (const q of queries) {
-      try {
-        const res = await this.db.query(q.sql, q.params);
-        results[q.name] = { success: true, rows: res.rows };
-      } catch (err: any) {
-        results[q.name] = { success: false, error: err.message, stack: err.stack };
-      }
-    }
-
-    try {
-      const low = await this.inventoryService.findLowStock();
-      results['findLowStock'] = { success: true, count: low.length };
-    } catch (err: any) {
-      results['findLowStock'] = { success: false, error: err.message, stack: err.stack };
-    }
-
-    try {
-      const exp = await this.inventoryService.findExpiring();
-      results['findExpiring'] = { success: true, count: exp.length };
-    } catch (err: any) {
-      results['findExpiring'] = { success: false, error: err.message, stack: err.stack };
-    }
-
-    return {
-      tenantId: tid,
-      databaseUrlMasked: (process.env.DATABASE_URL || '').replace(/:([^@]+)@/, ':***@'),
-      results,
-    };
-  }
 
   async getManagerStats(warehouseId: string) {
     const tid = getCurrentTenantId();
@@ -182,91 +131,83 @@ export class DashboardService {
       recentActivity: activityRes.rows.map((a: any) => ({ id: a.id, movementNumber: a.movement_number, type: a.movement_type, quantity: parseInt(a.quantity || 0), createdAt: a.created_at })),
     };
   }  async getStats(warehouseId?: string) {
-    try {
-      const tid = getCurrentTenantId();
-      const tOnly = [tid];
-      const tAndWh = warehouseId ? [tid, warehouseId] : tOnly;
-      const whClause = warehouseId ? ' AND warehouse_id = $2' : '';
+    const tid = getCurrentTenantId();
+    const tOnly = [tid];
+    const tAndWh = warehouseId ? [tid, warehouseId] : tOnly;
+    const whClause = warehouseId ? ' AND warehouse_id = $2' : '';
 
-      const [
-        skuCount, warehouseCount, openSOs,
-        stockUnits, movements, returnsToday,
-        alerts, grn, qc, shipments, tasks,
-        lowStockCount, expiringCount,
-      ] = await Promise.all([
-        this.db.query('SELECT COUNT(*) as c FROM skus WHERE tenant_id = $1', tOnly),
-        this.db.query(`SELECT COUNT(*) as c FROM warehouses WHERE tenant_id = $1 AND status != 'inactive'`, tOnly),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM sales_orders WHERE tenant_id = $1 AND status NOT IN ('delivered','cancelled')${whClause}`,
-          tAndWh,
-        ),
-        this.db.query(
-          `SELECT COALESCE(SUM(quantity_available), 0) as total FROM stock_levels WHERE tenant_id = $1${whClause}`,
-          tAndWh,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as daily_movements,
-            COALESCE(SUM(CASE WHEN movement_type IN ('stock_in','putaway','return') THEN quantity ELSE 0 END), 0) as today_inward,
-            COALESCE(SUM(CASE WHEN movement_type IN ('stock_out','damage','scrap') THEN quantity ELSE 0 END), 0) as today_outward
-           FROM stock_movements WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE${whClause}`,
-          tAndWh,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM returns WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE`,
-          tOnly,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM inventory_alerts WHERE tenant_id = $1 AND is_acknowledged = false`,
-          tOnly,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM grn WHERE tenant_id = $1 AND status = 'pending'${whClause}`,
-          tAndWh,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM qc_inspections qi
-           JOIN grn g ON qi.grn_id = g.id
-           WHERE g.tenant_id = $1 AND qi.status = 'pending'${warehouseId ? ' AND g.warehouse_id = $2' : ''}`,
-          tAndWh,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM shipments sh
-           JOIN sales_orders so ON sh.so_id = so.id
-           WHERE sh.tenant_id = $1 AND sh.status = 'pending'${warehouseId ? ' AND so.warehouse_id = $2' : ''}`,
-          tAndWh,
-        ),
-        this.db.query(
-          `SELECT COUNT(*) as c FROM tasks WHERE tenant_id = $1 AND status NOT IN ('completed','cancelled')${whClause}`,
-          tAndWh,
-        ),
-        this.inventoryService.findLowStock(),
-        this.inventoryService.findExpiring(),
-      ]);
+    const [
+      skuCount, warehouseCount, openSOs,
+      stockUnits, movements, returnsToday,
+      alerts, grn, qc, shipments, tasks,
+      lowStockCount, expiringCount,
+    ] = await Promise.all([
+      this.db.query('SELECT COUNT(*) as c FROM skus WHERE tenant_id = $1', tOnly),
+      this.db.query(`SELECT COUNT(*) as c FROM warehouses WHERE tenant_id = $1 AND status != 'inactive'`, tOnly),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM sales_orders WHERE tenant_id = $1 AND status NOT IN ('delivered','cancelled')${whClause}`,
+        tAndWh,
+      ),
+      this.db.query(
+        `SELECT COALESCE(SUM(quantity_available), 0) as total FROM stock_levels WHERE tenant_id = $1${whClause}`,
+        tAndWh,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as daily_movements,
+          COALESCE(SUM(CASE WHEN movement_type IN ('stock_in','putaway','return') THEN quantity ELSE 0 END), 0) as today_inward,
+          COALESCE(SUM(CASE WHEN movement_type IN ('stock_out','damage','scrap') THEN quantity ELSE 0 END), 0) as today_outward
+         FROM stock_movements WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE${whClause}`,
+        tAndWh,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM returns WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE`,
+        tOnly,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM inventory_alerts WHERE tenant_id = $1 AND is_acknowledged = false`,
+        tOnly,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM grn WHERE tenant_id = $1 AND status = 'pending'${whClause}`,
+        tAndWh,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM qc_inspections qi
+         JOIN grn g ON qi.grn_id = g.id
+         WHERE g.tenant_id = $1 AND qi.status = 'pending'${warehouseId ? ' AND g.warehouse_id = $2' : ''}`,
+         tAndWh,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM shipments sh
+         JOIN sales_orders so ON sh.so_id = so.id
+         WHERE sh.tenant_id = $1 AND sh.status = 'pending'${warehouseId ? ' AND so.warehouse_id = $2' : ''}`,
+         tAndWh,
+      ),
+      this.db.query(
+        `SELECT COUNT(*) as c FROM tasks WHERE tenant_id = $1 AND status NOT IN ('completed','cancelled')${whClause}`,
+        tAndWh,
+      ),
+      this.inventoryService.findLowStock(),
+      this.inventoryService.findExpiring(),
+    ]);
 
-      return {
-        totalSkus: parseInt(skuCount.rows[0].c),
-        totalWarehouses: parseInt(warehouseCount.rows[0].c),
-        openSOs: parseInt(openSOs.rows[0].c),
-        totalStockUnits: parseInt(stockUnits.rows[0].total),
-        dailyMovements: parseInt(movements.rows[0].daily_movements),
-        todayInwardQty: parseInt(movements.rows[0].today_inward),
-        todayOutwardQty: parseInt(movements.rows[0].today_outward),
-        returnsToday: parseInt(returnsToday.rows[0].c),
-        unacknowledgedAlerts: parseInt(alerts.rows[0].c),
-        grnPending: parseInt(grn.rows[0].c),
-        qcPending: parseInt(qc.rows[0].c),
-        shipmentsPending: parseInt(shipments.rows[0].c),
-        pendingTasks: parseInt(tasks.rows[0].c),
-        lowStockItems: lowStockCount.length,
-        expiringItems: expiringCount.length,
-      };
-    } catch (error: any) {
-      console.error('Error in getStats:', error);
-      throw new InternalServerErrorException({
-        message: error.message,
-        stack: error.stack,
-      });
-    }
+    return {
+      totalSkus: parseInt(skuCount.rows[0].c),
+      totalWarehouses: parseInt(warehouseCount.rows[0].c),
+      openSOs: parseInt(openSOs.rows[0].c),
+      totalStockUnits: parseInt(stockUnits.rows[0].total),
+      dailyMovements: parseInt(movements.rows[0].daily_movements),
+      todayInwardQty: parseInt(movements.rows[0].today_inward),
+      todayOutwardQty: parseInt(movements.rows[0].today_outward),
+      returnsToday: parseInt(returnsToday.rows[0].c),
+      unacknowledgedAlerts: parseInt(alerts.rows[0].c),
+      grnPending: parseInt(grn.rows[0].c),
+      qcPending: parseInt(qc.rows[0].c),
+      shipmentsPending: parseInt(shipments.rows[0].c),
+      pendingTasks: parseInt(tasks.rows[0].c),
+      lowStockItems: lowStockCount.length,
+      expiringItems: expiringCount.length,
+    };
   }
 
   async getInventoryOverview() {
@@ -291,24 +232,16 @@ export class DashboardService {
   }
 
   async getOrdersSummary() {
-    try {
-      const tid = getCurrentTenantId();
-      const [poStats, soStats] = await Promise.all([
-        this.db.query(`SELECT status, COUNT(*) as _count FROM purchase_orders WHERE tenant_id = $1 GROUP BY status`, [tid]),
-        this.db.query(`SELECT status, COUNT(*) as _count FROM sales_orders WHERE tenant_id = $1 GROUP BY status`, [tid]),
-      ]);
+    const tid = getCurrentTenantId();
+    const [poStats, soStats] = await Promise.all([
+      this.db.query(`SELECT status, COUNT(*) as _count FROM purchase_orders WHERE tenant_id = $1 GROUP BY status`, [tid]),
+      this.db.query(`SELECT status, COUNT(*) as _count FROM sales_orders WHERE tenant_id = $1 GROUP BY status`, [tid]),
+    ]);
 
-      return {
-        poByStatus: poStats.rows.map((r: any) => ({ status: r.status, _count: parseInt(r._count) })),
-        soByStatus: soStats.rows.map((r: any) => ({ status: r.status, _count: parseInt(r._count) })),
-      };
-    } catch (error: any) {
-      console.error('Error in getOrdersSummary:', error);
-      throw new InternalServerErrorException({
-        message: error.message,
-        stack: error.stack,
-      });
-    }
+    return {
+      poByStatus: poStats.rows.map((r: any) => ({ status: r.status, _count: parseInt(r._count) })),
+      soByStatus: soStats.rows.map((r: any) => ({ status: r.status, _count: parseInt(r._count) })),
+    };
   }
 
   async getTrendData(period: string) {
