@@ -55,13 +55,32 @@ export class GrnRepository {
     grn.items = itemsRes.rows.map((r: any) => ({
       id: r.id,
       grnId: r.grn_id,
+      grn_id: r.grn_id,
       skuId: r.sku_id,
-      skuCode: r.sku_code,
-      skuName: r.sku_name,
+      sku_id: r.sku_id,
+      
+      // SKU nesting
+      sku: { id: r.sku_id, skuCode: r.sku_code, name: r.sku_name },
+      skus: { id: r.sku_id, sku_code: r.sku_code, name: r.sku_name },
+      
+      // Quantities
       quantityExpected: r.quantity_expected,
+      quantity_expected: r.quantity_expected,
+      expectedQuantity: r.quantity_expected,
+      expected_quantity: r.quantity_expected,
+      
       quantityReceived: r.quantity_received,
+      quantity_received: r.quantity_received,
+      receivedQuantity: r.quantity_received,
+      received_quantity: r.quantity_received,
+      
+      // Other fields
       batchNumber: r.batch_number,
+      batch_number: r.batch_number,
+      
       expiryDate: r.expiry_date,
+      expiry_date: r.expiry_date,
+      
       condition: r.condition,
       notes: r.notes,
     }));
@@ -212,13 +231,32 @@ export class GrnRepository {
     return {
       id: r.id,
       grnId: r.grn_id,
+      grn_id: r.grn_id,
       skuId: r.sku_id,
-      skuCode: r.sku_code,
-      skuName: r.sku_name,
+      sku_id: r.sku_id,
+      
+      // SKU nesting
+      sku: { id: r.sku_id, skuCode: r.sku_code, name: r.sku_name },
+      skus: { id: r.sku_id, sku_code: r.sku_code, name: r.sku_name },
+      
+      // Quantities
       quantityExpected: r.quantity_expected,
+      quantity_expected: r.quantity_expected,
+      expectedQuantity: r.quantity_expected,
+      expected_quantity: r.quantity_expected,
+      
       quantityReceived: r.quantity_received,
+      quantity_received: r.quantity_received,
+      receivedQuantity: r.quantity_received,
+      received_quantity: r.quantity_received,
+      
+      // Other fields
       batchNumber: r.batch_number,
+      batch_number: r.batch_number,
+      
       expiryDate: r.expiry_date,
+      expiry_date: r.expiry_date,
+      
       condition: r.condition,
       notes: r.notes,
     };
