@@ -3,6 +3,7 @@ import { GrnRepository } from './grn.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
+import { QcService } from '../qc/qc.service';
 
 interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
@@ -14,6 +15,7 @@ export class GrnService {
     private repository: GrnRepository,
     private invoices: InvoicesService,
     private purchaseOrders: PurchaseOrdersService,
+    private qcService: QcService,
   ) {}
 
 
@@ -80,6 +82,25 @@ export class GrnService {
           this.logger.log(`Updated associated PO ${before.poId} status to 'received'`);
         } catch (err) {
           this.logger.error(`Failed to update PO ${before.poId} status on GRN completion`, err as Error);
+        }
+      }
+
+      // Auto-create QC Inspection for each item received with quantity > 0
+      if (before.items && Array.isArray(before.items)) {
+        for (const item of before.items) {
+          if (item.quantityReceived > 0) {
+            try {
+              const qc = await this.qcService.create({
+                grnId: id,
+                skuId: item.skuId,
+                batchNumber: item.batchNumber || null,
+                notes: `Auto-generated from GRN ${before.grnNumber}`,
+              });
+              this.logger.log(`Auto-created QC inspection ${qc.qcNumber} for SKU ${item.skuId} in GRN ${id}`);
+            } catch (err) {
+              this.logger.error(`Failed to auto-create QC inspection for SKU ${item.skuId} in GRN ${id}`, err as Error);
+            }
+          }
         }
       }
     }
