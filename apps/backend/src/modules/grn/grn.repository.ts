@@ -154,6 +154,76 @@ export class GrnRepository {
     return this.mapRow(res.rows[0]);
   }
 
+  async updateItem(grnId: string, itemId: string, dto: any): Promise<any> {
+    const updates: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+
+    const fieldMap: Record<string, string> = {
+      received_quantity: 'quantity_received',
+      receivedQuantity: 'quantity_received',
+      quantity_received: 'quantity_received',
+      quantityReceived: 'quantity_received',
+      
+      batch_number: 'batch_number',
+      batchNumber: 'batch_number',
+      
+      expiry_date: 'expiry_date',
+      expiryDate: 'expiry_date',
+      
+      condition: 'condition',
+      notes: 'notes',
+    };
+
+    for (const [key, col] of Object.entries(fieldMap)) {
+      if (dto[key] !== undefined) {
+        updates.push(`${col} = $${idx}`);
+        params.push(dto[key] === '' ? null : dto[key]);
+        idx++;
+      }
+    }
+
+    if (updates.length === 0) {
+      return this.findItemById(itemId);
+    }
+
+    params.push(itemId, grnId);
+    
+    await this.db.query(
+      `UPDATE grn_items 
+       SET ${updates.join(', ')} 
+       WHERE id = $${idx} AND grn_id = $${idx + 1}`,
+      params,
+    );
+
+    return this.findItemById(itemId);
+  }
+
+  async findItemById(itemId: string): Promise<any> {
+    const res = await this.db.query(
+      `SELECT gi.*, sk.code as sku_code, sk.name as sku_name
+       FROM grn_items gi
+       LEFT JOIN skus sk ON gi.sku_id = sk.id
+       WHERE gi.id = $1`,
+      [itemId]
+    );
+    const r = res.rows[0];
+    if (!r) return null;
+    return {
+      id: r.id,
+      grnId: r.grn_id,
+      skuId: r.sku_id,
+      skuCode: r.sku_code,
+      skuName: r.sku_name,
+      quantityExpected: r.quantity_expected,
+      quantityReceived: r.quantity_received,
+      batchNumber: r.batch_number,
+      expiryDate: r.expiry_date,
+      condition: r.condition,
+      notes: r.notes,
+    };
+  }
+
   private mapRow(row: any) {
     if (!row) return null;
     return {

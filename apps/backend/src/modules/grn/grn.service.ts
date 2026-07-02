@@ -87,6 +87,11 @@ export class GrnService {
     return updated;
   }
 
+  async updateItem(grnId: string, itemId: string, dto: any) {
+    await this.findOne(grnId);
+    return this.repository.updateItem(grnId, itemId, dto);
+  }
+
   private async generateCode(): Promise<string> {
     const count = await this.repository.countByTenant(getCurrentTenantId());
     return `GRN-${String(count + 1).padStart(3, '0')}`;

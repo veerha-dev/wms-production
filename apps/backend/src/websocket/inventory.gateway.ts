@@ -12,7 +12,10 @@ import { Logger } from '@nestjs/common';
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : ['http://localhost:8080'],
+    origin: (process.env.CORS_ORIGIN || 'http://localhost:8080,http://localhost:8090')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
     credentials: true,
   },
   namespace: '/inventory',

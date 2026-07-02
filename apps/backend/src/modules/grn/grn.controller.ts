@@ -30,6 +30,15 @@ export class GrnController {
   @Delete(':id')
   async remove(@Param('id') id: string) { await this.service.remove(id); return { success: true, data: { id } }; }
 
+  @Put(':id/items/:itemId')
+  async updateItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: any,
+  ) {
+    return { success: true, data: await this.service.updateItem(id, itemId, dto) };
+  }
+
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
   async complete(@Param('id') id: string) { return { success: true, data: await this.service.updateStatus(id, 'completed', { receivedDate: new Date() }) }; }
