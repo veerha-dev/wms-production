@@ -16,6 +16,57 @@ export class DashboardService {
     private inventoryService: InventoryService,
   ) {}
 
+  async debugDb(warehouseId?: string) {
+    const tid = getCurrentTenantId();
+    const tOnly = [tid];
+    const tAndWh = warehouseId ? [tid, warehouseId] : tOnly;
+    const whClause = warehouseId ? ' AND warehouse_id = $2' : '';
+
+    const results: any = {};
+    const queries = [
+      { name: 'skus', sql: 'SELECT COUNT(*) as c FROM skus WHERE tenant_id = $1', params: tOnly },
+      { name: 'warehouses', sql: `SELECT COUNT(*) as c FROM warehouses WHERE tenant_id = $1 AND status != 'inactive'`, params: tOnly },
+      { name: 'sales_orders', sql: `SELECT COUNT(*) as c FROM sales_orders WHERE tenant_id = $1 AND status NOT IN ('delivered','cancelled')${whClause}`, params: tAndWh },
+      { name: 'stock_levels', sql: `SELECT COALESCE(SUM(quantity_available), 0) as total FROM stock_levels WHERE tenant_id = $1${whClause}`, params: tAndWh },
+      { name: 'stock_movements', sql: `SELECT COUNT(*) as daily_movements FROM stock_movements WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE${whClause}`, params: tAndWh },
+      { name: 'returns', sql: `SELECT COUNT(*) as c FROM returns WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE`, params: tOnly },
+      { name: 'inventory_alerts', sql: `SELECT COUNT(*) as c FROM inventory_alerts WHERE tenant_id = $1 AND is_acknowledged = false`, params: tOnly },
+      { name: 'grn', sql: `SELECT COUNT(*) as c FROM grn WHERE tenant_id = $1 AND status = 'pending'${whClause}`, params: tAndWh },
+      { name: 'qc_inspections', sql: `SELECT COUNT(*) as c FROM qc_inspections qi JOIN grn g ON qi.grn_id = g.id WHERE g.tenant_id = $1 AND qi.status = 'pending'${warehouseId ? ' AND g.warehouse_id = $2' : ''}`, params: tAndWh },
+      { name: 'shipments', sql: `SELECT COUNT(*) as c FROM shipments sh JOIN sales_orders so ON sh.so_id = so.id WHERE sh.tenant_id = $1 AND sh.status = 'pending'${warehouseId ? ' AND so.warehouse_id = $2' : ''}`, params: tAndWh },
+      { name: 'tasks', sql: `SELECT COUNT(*) as c FROM tasks WHERE tenant_id = $1 AND status NOT IN ('completed','cancelled')${whClause}`, params: tAndWh }
+    ];
+
+    for (const q of queries) {
+      try {
+        const res = await this.db.query(q.sql, q.params);
+        results[q.name] = { success: true, rows: res.rows };
+      } catch (err: any) {
+        results[q.name] = { success: false, error: err.message, stack: err.stack };
+      }
+    }
+
+    try {
+      const low = await this.inventoryService.findLowStock();
+      results['findLowStock'] = { success: true, count: low.length };
+    } catch (err: any) {
+      results['findLowStock'] = { success: false, error: err.message, stack: err.stack };
+    }
+
+    try {
+      const exp = await this.inventoryService.findExpiring();
+      results['findExpiring'] = { success: true, count: exp.length };
+    } catch (err: any) {
+      results['findExpiring'] = { success: false, error: err.message, stack: err.stack };
+    }
+
+    return {
+      tenantId: tid,
+      databaseUrlMasked: (process.env.DATABASE_URL || '').replace(/:([^@]+)@/, ':***@'),
+      results,
+    };
+  }
+
   async getManagerStats(warehouseId: string) {
     const tid = getCurrentTenantId();
     const [

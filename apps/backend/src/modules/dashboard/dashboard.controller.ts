@@ -5,6 +5,11 @@ import { DashboardService } from './dashboard.service';
 export class DashboardController {
   constructor(private service: DashboardService) {}
 
+  @Get('debug-db')
+  async debugDb(@Query('warehouseId') warehouseId?: string) {
+    return this.service.debugDb(warehouseId);
+  }
+
   @Get('manager-stats')
   async getManagerStats(@Query('warehouseId') warehouseId?: string) {
     if (!warehouseId) throw new BadRequestException('warehouseId is required');

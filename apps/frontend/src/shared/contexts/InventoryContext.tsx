@@ -608,6 +608,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     await createDamagedMutation.mutateAsync({
       skuId: sku?.id || damage.skuId,
       warehouseId: damage.location,
+      location: damage.location,
       quantity: damage.quantity,
       damageType: damage.category,
       description: damage.description,
