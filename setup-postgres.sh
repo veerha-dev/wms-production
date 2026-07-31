@@ -9,8 +9,19 @@ PASSWORD="veerha123"
 # Create PostgreSQL user and database using SQL commands
 echo "📝 Creating database and user..."
 
+# Find psql: prefer whatever is on PATH, fall back to the Homebrew keg
+if command -v psql > /dev/null 2>&1; then
+  PSQL="psql"
+elif [ -x /opt/homebrew/opt/postgresql@16/bin/psql ]; then
+  PSQL="/opt/homebrew/opt/postgresql@16/bin/psql"
+else
+  echo "❌ psql not found. Install PostgreSQL (e.g. brew install postgresql@16) or use Docker instead:"
+  echo "   docker compose up -d postgres"
+  exit 1
+fi
+
 # Use psql with peer authentication (works for system user)
-/opt/homebrew/opt/postgresql@16/bin/psql -d postgres << EOF
+"$PSQL" -d postgres << EOF
 -- Create database
 CREATE DATABASE veerha_wms_dev;
 

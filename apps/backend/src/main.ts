@@ -33,6 +33,11 @@ async function bootstrap() {
     }),
   );
 
+  // API docs expose the full route/DTO map, so they are off in production
+  // unless explicitly enabled with ENABLE_API_DOCS=true.
+  const docsEnabled =
+    process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true';
+
   // Swagger/OpenAPI Configuration
   const config = new DocumentBuilder()
     .setTitle('Veerha WMS API')
@@ -68,21 +73,23 @@ async function bootstrap() {
     .addTag('Dashboard', 'Analytics and reporting endpoints')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config, {
-    operationIdFactory: (controllerKey: string, methodKey: string) => methodKey,
-    deepScanRoutes: true,
-  });
+  if (docsEnabled) {
+    const document = SwaggerModule.createDocument(app, config, {
+      operationIdFactory: (controllerKey: string, methodKey: string) => methodKey,
+      deepScanRoutes: true,
+    });
 
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-      filter: true,
-      showRequestDuration: true,
-      tryItOutEnabled: true,
-    },
-    customSiteTitle: 'Veerha WMS API Documentation',
-  });
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+        docExpansion: 'none',
+        filter: true,
+        showRequestDuration: true,
+        tryItOutEnabled: true,
+      },
+      customSiteTitle: 'Veerha WMS API Documentation',
+    });
+  }
 
   // Health check endpoint
   const httpAdapter = app.getHttpAdapter();
@@ -91,8 +98,9 @@ async function bootstrap() {
   });
 
   // ReDoc API Documentation
-  httpAdapter.get('/api/redoc', (req, res) => {
-    res.send(`<!DOCTYPE html>
+  if (docsEnabled) {
+    httpAdapter.get('/api/redoc', (req, res) => {
+      res.send(`<!DOCTYPE html>
 <html>
   <head>
     <title>Veerha WMS API Reference</title>
@@ -106,13 +114,16 @@ async function bootstrap() {
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
   </body>
 </html>`);
-  });
+    });
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
   console.log(`🚀 Backend running on http://localhost:${port}`);
-  console.log(`📚 API Documentation (Swagger) available at http://localhost:${port}/api/docs`);
-  console.log(`📖 API Reference (ReDoc) available at http://localhost:${port}/api/redoc`);
+  if (docsEnabled) {
+    console.log(`📚 API Documentation (Swagger) available at http://localhost:${port}/api/docs`);
+    console.log(`📖 API Reference (ReDoc) available at http://localhost:${port}/api/redoc`);
+  }
 }
 
 bootstrap();

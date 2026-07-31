@@ -50,10 +50,35 @@ async function runMigrations() {
     const filePath = path.join(migrationsDir, file);
     const sql = fs.readFileSync(filePath, 'utf-8');
 
+    // Escape hatch: a first line containing `-- no-transaction` runs the file
+    // unwrapped (needed for statements like CREATE INDEX CONCURRENTLY that
+    // cannot run inside a transaction block).
+    const firstLine = sql.split('\n', 1)[0] ?? '';
+    const noTransaction = firstLine.includes('-- no-transaction');
+
     try {
-      await pool.query(sql);
-      await pool.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
-      console.log(`✅ Executed: ${file}`);
+      if (noTransaction) {
+        await pool.query(sql);
+        await pool.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
+      } else {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(sql);
+          await client.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
+          await client.query('COMMIT');
+        } catch (error) {
+          try {
+            await client.query('ROLLBACK');
+          } catch {
+            // ignore rollback failure — original error is what matters
+          }
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+      console.log(`✅ Executed: ${file}${noTransaction ? ' (no transaction)' : ''}`);
       count++;
     } catch (error) {
       console.error(`❌ Failed: ${file}`);

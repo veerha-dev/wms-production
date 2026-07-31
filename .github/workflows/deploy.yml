@@ -32,7 +32,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=apps/frontend
+        run: npm ci --workspace=apps/frontend --legacy-peer-deps
 
       - name: Build frontend
         working-directory: apps/frontend
@@ -61,7 +61,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=apps/super-admin
+        run: npm ci --workspace=apps/super-admin --legacy-peer-deps
 
       - name: Build super-admin
         working-directory: apps/super-admin

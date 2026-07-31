@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { getAccessToken } from '@/shared/lib/api';
 
 interface Notification {
   id: string;
@@ -22,6 +23,7 @@ export function useNotifications() {
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     socketRef.current = io(`${API_BASE_URL}/inventory`, {
       withCredentials: true,
+      auth: { token: getAccessToken() },
     });
 
     const socket = socketRef.current;

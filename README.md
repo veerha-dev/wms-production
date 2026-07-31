@@ -1,208 +1,135 @@
 # Veerha WMS — Warehouse Management System
 
-A full-stack, multi-tenant Warehouse Management System built with a **modular monolithic** architecture.
-
----
+A full-stack, multi-tenant Warehouse Management System (npm workspaces monorepo).
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| **Frontend** | React 18, Vite, TypeScript, TailwindCSS, shadcn/ui, React Query |
-| **Backend** | Fastify, TypeScript, Prisma ORM |
-| **Database** | PostgreSQL |
-| **Auth** | JWT (access + refresh tokens) |
-| **Deployment** | Render (backend), Netlify/Cloudflare (frontend) |
-| **Monorepo** | npm workspaces |
+| Backend | NestJS 10, TypeScript, raw `pg` (no ORM), custom SQL migrations, Socket.IO |
+| Frontend | React 18, Vite, TypeScript, TailwindCSS, shadcn/ui, React Query |
+| Super Admin | React 18, Vite, TypeScript (separate console for platform operators) |
+| Shared | `@veerha/shared-types` — TypeScript types shared by backend and frontend |
+| Database | PostgreSQL 16 |
+| Auth | JWT (access + refresh tokens), bcrypt |
+| Deployment | Render (backend, Docker), Cloudflare Pages (frontend + super-admin) via GitHub Actions |
 
----
-
-## Project Structure
+## Monorepo Layout
 
 ```
 veerha-wms/
 ├── apps/
-│   ├── backend/           # Fastify API server
-│   │   ├── prisma/        # Prisma schema & migrations
-│   │   └── src/
-│   │       ├── core/      # App setup, server, auth middleware
-│   │       ├── modules/   # Feature modules (26 total)
-│   │       │   ├── adjustments/
-│   │       │   ├── alerts/
-│   │       │   ├── auth/
-│   │       │   ├── bins/
-│   │       │   ├── customers/
-│   │       │   ├── damaged-items/
-│   │       │   ├── dashboard/
-│   │       │   ├── grn/
-│   │       │   ├── inventory/
-│   │       │   ├── invoices/
-│   │       │   ├── pick-lists/
-│   │       │   ├── purchase-orders/
-│   │       │   ├── qc/
-│   │       │   ├── racks/
-│   │       │   ├── reports/
-│   │       │   ├── returns/
-│   │       │   ├── sales-orders/
-│   │       │   ├── seed/
-│   │       │   ├── shipments/
-│   │       │   ├── skus/
-│   │       │   ├── suppliers/
-│   │       │   ├── tasks/
-│   │       │   ├── users/
-│   │       │   ├── warehouses/
-│   │       │   └── zones/
-│   │       └── shared/    # Utilities, errors, codegen, stock-level-helper
-│   └── frontend/          # React SPA
-│       └── src/
-│           ├── features/  # Feature-based modules
-│           │   ├── dashboard/
-│           │   ├── inbound/       # PO, GRN, QC
-│           │   ├── inventory/     # SKUs, stock, batches, movements
-│           │   ├── operations/    # Tasks, adjustments, damaged, workflows
-│           │   ├── outbound/      # SO, pick lists, shipments
-│           │   ├── settings/
-│           │   ├── suppliers/
-│           │   └── warehouse/     # Warehouses, zones, racks, bins
-│           └── shared/    # Contexts, hooks, components, types
+│   ├── backend/         # NestJS API (@veerha/backend) — modules under src/modules/,
+│   │   │                #   SQL migrations under src/database/migrations/
+│   │   └── Dockerfile   # Production image used by Render
+│   ├── frontend/        # Main React SPA (@veerha-wms/frontend) — admin & manager UI
+│   └── super-admin/     # Platform operator console (@veerha/super-admin)
 ├── packages/
-│   └── shared-types/      # Shared TypeScript types
-├── scripts/               # DB & deployment scripts
-└── infrastructure/        # Wrangler, CI configs
+│   └── shared-types/    # @veerha/shared-types — build before typechecking apps
+├── docker-compose.yml   # Local Postgres 16 + Adminer
+└── render.yaml          # Render blueprint for the backend service
 ```
 
----
+## Prerequisites
 
-## Getting Started
+- Node.js 20+
+- Docker (for local PostgreSQL), or a native PostgreSQL 16 install
 
-### Prerequisites
-
-- **Node.js** >= 18
-- **PostgreSQL** >= 14
-- **npm** >= 9
-
-### 1. Clone & Install
+## Quickstart
 
 ```bash
-git clone <repo-url> veerha-wms
-cd veerha-wms
-npm install
-```
+# 1. Start PostgreSQL (user veerha / veerha123, db veerha_wms_dev) + Adminer
+docker compose up -d postgres
 
-### 2. Configure Environment
-
-```bash
-# Backend
+# 2. Configure the backend
 cp apps/backend/.env.example apps/backend/.env
-# Edit apps/backend/.env with your DATABASE_URL, JWT_SECRET, etc.
-```
+# For the Docker DB set:
+# DATABASE_URL=postgresql://veerha:veerha123@localhost:5432/veerha_wms_dev
 
-### 3. Set Up Database
+# 3. Install dependencies (root — installs all workspaces)
+npm install --legacy-peer-deps
 
-```bash
-cd apps/backend
-npx prisma generate
-npx prisma db push
-# Optional: seed demo data
-npx tsx src/modules/seed/seed.service.ts
-```
+# 4. Build shared types (required before frontend/backend typecheck or build)
+npm run build:types
 
-### 4. Run Development Servers
+# 5. Run database migrations
+npm run migrate
 
-```bash
-# From project root — starts both backend and frontend
+# 6. Start the backend (port 3000)
+npm run dev:backend
+
+# 7. In another terminal, start the frontend (port 8080)
 npm run dev
 
-# Or separately:
-npm run dev:backend    # Fastify on http://localhost:3000
-npm run dev:frontend   # Vite on http://localhost:5173
+# Optional: super-admin console (port 8090)
+npm run dev --workspace=apps/super-admin
 ```
 
----
+> `--legacy-peer-deps` is required because the backend mixes NestJS 10 core with
+> NestJS 11 peer-dependent packages (`@nestjs/swagger@11`, `@nestjs/jwt@11`, ...).
 
-## API Overview
+## Root npm Scripts
 
-All API routes are prefixed with `/api/v1` and require JWT authentication (except `/auth/login` and `/auth/register`).
+| Script | What it does |
+|--------|--------------|
+| `npm run dev` | Frontend dev server (port 8080) |
+| `npm run dev:backend` | Backend dev server with watch (port 3000) |
+| `npm run migrate` | Run backend SQL migrations |
+| `npm run build:types` | Build `@veerha/shared-types` |
+| `npm run build` / `build:backend` / `build:all` | Build frontend / backend / everything |
+| `npm run lint` | Lint the frontend |
+| `npm run test:frontend` / `test:backend` | Vitest / Jest |
 
-| Module | Endpoints |
-|--------|-----------|
-| Auth | `POST /auth/login`, `POST /auth/register`, `POST /auth/refresh` |
-| Warehouses | `GET/POST /warehouses`, `GET/PUT/DELETE /warehouses/:id` |
-| Zones | `GET/POST /zones`, `GET/PUT/DELETE /zones/:id` |
-| Racks | `GET/POST /racks`, `GET/PUT/DELETE /racks/:id` |
-| Bins | `GET/POST /bins`, `GET/PUT/DELETE /bins/:id` |
-| SKUs | `GET/POST /skus`, `GET/PUT/DELETE /skus/:id` |
-| Inventory | `GET/POST /inventory`, `GET /inventory/movements` |
-| Batches | `GET/POST /batches`, `GET/PUT /batches/:id` |
-| Suppliers | `GET/POST /suppliers`, `GET/PUT/DELETE /suppliers/:id` |
-| Customers | `GET/POST /customers`, `GET/PUT/DELETE /customers/:id` |
-| Purchase Orders | `GET/POST /purchase-orders`, `PUT /purchase-orders/:id` |
-| GRN | `GET/POST /grn`, `PUT /grn/:id/complete` |
-| QC | `GET/POST /qc`, `PUT /qc/:id` |
-| Sales Orders | `GET/POST /sales-orders`, `PUT /sales-orders/:id` |
-| Pick Lists | `GET/POST /pick-lists`, `PUT /pick-lists/:id` |
-| Shipments | `GET/POST /shipments`, `PUT /shipments/:id` |
-| Returns | `GET/POST /returns`, `PUT /returns/:id` |
-| Damaged Items | `GET/POST /damaged-items`, `PUT /damaged-items/:id` |
-| Adjustments | `GET/POST /adjustments`, `PUT /adjustments/:id/approve` |
-| Tasks | `GET/POST /tasks`, `PUT /tasks/:id` |
-| Alerts | `GET /alerts`, `PUT /alerts/:id/acknowledge` |
-| Users | `GET/POST /users`, `GET/PUT /users/:id` |
-| Dashboard | `GET /dashboard/stats` |
-| Reports | `GET /reports/inventory` |
-| Invoices | `GET/POST /invoices`, `GET/PUT /invoices/:id` |
+## Ports
 
----
+| Service | Port |
+|---------|------|
+| Backend API (NestJS) | 3000 |
+| Frontend (Vite) | 8080 |
+| Super Admin (Vite) | 8090 |
+| PostgreSQL | 5432 |
+| Adminer (DB UI) | 8070 |
 
-## Deployment
+## Environment Variables
 
-### Render (Backend)
+### Backend (`apps/backend/.env`, see `.env.example`)
 
-The project includes a `render.yaml` for one-click deploy:
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `PORT` | API port (default 3000) |
+| `NODE_ENV` | `development` / `production` |
+| `CORS_ORIGIN` | Comma-separated allowed origins |
+| `JWT_SECRET`, `JWT_REFRESH_SECRET` | Token signing secrets (`openssl rand -base64 64`) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Email. Empty `SMTP_HOST` makes EmailService a no-op (log-only) — safe for dev |
+| `APP_URL` | Public frontend URL used in email links |
 
-1. Connect your GitHub repo to Render
-2. Set environment variables: `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `FRONTEND_URL`
-3. Deploy
+### Frontend (`apps/frontend`)
 
-### Frontend
+| Variable | Purpose |
+|----------|---------|
+| `VITE_API_URL` | Backend API base URL |
+| `VITE_API_MODE` | `real` to hit the API (set in CI/deploy) |
+| `VITE_SENTRY_DSN` | Optional Sentry error reporting |
 
-Build and deploy the frontend to any static hosting (Netlify, Cloudflare Pages, Vercel):
+### Super Admin (`apps/super-admin`)
 
-```bash
-npm run build
-# Output: apps/frontend/dist/
-```
+| Variable | Purpose |
+|----------|---------|
+| `VITE_API_URL` | Backend API base URL |
 
-Set `VITE_API_URL` to your backend URL.
+## CI / Deployment
 
----
+- **CI** (`.github/workflows/ci.yml`): on every PR and push to `main` — lint,
+  typecheck, test, and build for all three apps (shared-types built first).
+- **Deploy** (`.github/workflows/deploy.yml`): on push to `main` —
+  - Backend: Render deploy hook (Docker build from `apps/backend/Dockerfile`, blueprint in `render.yaml`, health check at `/health`).
+  - Frontend → Cloudflare Pages project `app-veerha`; Super Admin → project `veerha-admin`.
+- **Required GitHub secrets**: `RENDER_SERVICE_ID`, `RENDER_API_KEY`,
+  `VITE_API_URL`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
+- Render dashboard env vars (marked `sync: false` in `render.yaml`):
+  `DATABASE_URL`, `CORS_ORIGIN`, `APP_URL`, and the `SMTP_*` set.
 
-## Architecture
+## Roadmap
 
-The system follows a **modular monolithic** pattern:
-
-- **Backend**: Each module has its own `service.ts`, `routes.ts`, and `schema.ts` (Zod validation)
-- **Frontend**: Feature-based folder structure with dedicated hooks, components, and pages per domain
-- **Shared utilities**: Stock-level helper, code generation, error handling
-- **Multi-tenant**: All data is scoped by `tenantId` extracted from JWT
-
----
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start both frontend and backend |
-| `npm run dev:frontend` | Start frontend only |
-| `npm run dev:backend` | Start backend only |
-| `npm run build` | Build frontend for production |
-| `npm run build:backend` | Build backend |
-| `npm run migrate` | Run Prisma migrations |
-| `npm run seed` | Seed database with demo data |
-| `npm run lint` | Lint frontend code |
-
----
-
-## License
-
-Private — Veerha Technologies
+See [PLAN.md](PLAN.md) for the current audit and completion plan (admin & manager flows).

@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Request } from '@nestjs/common';
 import { AlertsService } from './alerts.service';
 import { CreateAlertDto, QueryAlertDto } from './dto';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('api/v1/alerts')
 export class AlertsController {
@@ -25,20 +26,23 @@ export class AlertsController {
   }
 
   @Post()
+  @Roles('admin', 'manager')
   async create(@Body() dto: CreateAlertDto) {
     const data = await this.service.create(dto);
     return { success: true, data };
   }
 
   @Post(':id/acknowledge')
-  async acknowledge(@Param('id') id: string, @Body() body: { acknowledgedBy?: string }) {
-    const data = await this.service.acknowledge(id, body.acknowledgedBy);
+  async acknowledge(@Param('id') id: string, @Request() req: any) {
+    // Actor comes from the authenticated user — never from the request body.
+    const data = await this.service.acknowledge(id, req.user.id);
     return { success: true, data };
   }
 
   @Post('acknowledge-all')
-  async acknowledgeAll(@Body() body: { acknowledgedBy?: string }) {
-    const data = await this.service.acknowledgeAll(body.acknowledgedBy);
+  async acknowledgeAll(@Request() req: any) {
+    // Actor comes from the authenticated user — never from the request body.
+    const data = await this.service.acknowledgeAll(req.user.id);
     return { success: true, data };
   }
 }

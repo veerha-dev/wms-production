@@ -5,6 +5,7 @@ services:
     dockerfilePath: apps/backend/Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false # Prompt user for Neon database URL
@@ -17,4 +18,18 @@ services:
       - key: JWT_REFRESH_SECRET
         generateValue: true # Render will automatically generate a secure random secret key
       - key: CORS_ORIGIN
-        value: "*" # Allow all origins by default (you can restrict this to your frontend URL later)
+        sync: false # Set in dashboard to the real frontend origins, comma-separated, e.g. https://app-veerha.pages.dev,https://veerha-admin.pages.dev plus any custom domain
+      - key: APP_URL
+        sync: false # Public frontend URL used in emails, e.g. https://app-veerha.pages.dev
+      - key: SMTP_HOST
+        sync: false # Leave empty to disable email (EmailService becomes a no-op)
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false # "true" for port 465, "false" for 587/STARTTLS
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false # e.g. "Veerha WMS <noreply@veerha.com>"

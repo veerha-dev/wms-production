@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui
 import { Badge } from '@/shared/components/ui/badge';
 import { Activity } from 'lucide-react';
 import { useAuth } from '@/shared/contexts/AuthContext';
+import { getAccessToken } from '@/shared/lib/api';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -43,6 +44,7 @@ export function ActivityFeed({ limit = 20 }: { limit?: number }) {
 
     const socket: Socket = io(`${API_BASE}/inventory`, {
       transports: ['websocket', 'polling'],
+      auth: { token: getAccessToken() },
     });
 
     socket.on('connect', () => {

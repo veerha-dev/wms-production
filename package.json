@@ -2,13 +2,23 @@
   "name": "veerha-wms",
   "private": true,
   "version": "1.0.0",
-  "description": "Veerha Warehouse Management System - Frontend Demo with Mock Data",
+  "description": "Veerha WMS — multi-tenant warehouse management system (backend, frontend, super-admin)",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "npm run dev --workspace=apps/frontend",
+    "dev:backend": "npm run start:dev --workspace=apps/backend",
     "build": "npm run build --workspace=apps/frontend",
+    "build:backend": "npm run build --workspace=apps/backend",
+    "build:types": "npm run build --workspace=packages/shared-types",
+    "build:all": "npm run build:types && npm run build --workspace=apps/backend --workspace=apps/frontend --workspace=apps/super-admin",
     "preview": "npm run preview --workspace=apps/frontend",
     "lint": "npm run lint --workspace=apps/frontend",
-    "test": "npm run test --workspace=apps/frontend"
+    "test": "npm run test --workspace=apps/frontend",
+    "test:frontend": "npm run test --workspace=apps/frontend",
+    "test:backend": "npm run test --workspace=apps/backend",
+    "migrate": "npm run migrate --workspace=apps/backend"
   },
   "workspaces": [
     "apps/*",

@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        # --legacy-peer-deps is required: the backend mixes NestJS 10 core
+        # (@nestjs/common@10, @nestjs/core@10) with NestJS 11 peer-dependent
+        # packages (@nestjs/swagger@11, @nestjs/jwt@11, @nestjs/websockets@11).
+        run: npm ci --legacy-peer-deps
+
+      - name: Build shared types
+        run: npm run build --workspace=packages/shared-types
+
+      - name: Lint
+        run: npm run lint --workspace=apps/frontend
+
+      - name: Typecheck
+        run: npx tsc -p apps/frontend/tsconfig.app.json --noEmit
+
+      - name: Test
+        run: npm test --workspace=apps/frontend
+
+      - name: Build
+        run: npm run build --workspace=apps/frontend
+
+  backend:
+    name: Backend (typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build shared types
+        run: npm run build --workspace=packages/shared-types
+
+      - name: Typecheck
+        run: npx tsc -p apps/backend/tsconfig.json --noEmit
+
+      - name: Test
+        # No backend specs exist yet; --passWithNoTests keeps the job green
+        # until the first *.spec.ts lands, at which point tests gate merges.
+        run: npm test --workspace=apps/backend -- --passWithNoTests
+
+      - name: Build
+        run: npm run build --workspace=apps/backend
+
+  super-admin:
+    name: Super Admin (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        run: npm run build --workspace=apps/super-admin

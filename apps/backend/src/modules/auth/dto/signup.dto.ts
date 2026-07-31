@@ -1,4 +1,4 @@
-import { IsEmail, IsString, IsOptional, MinLength, MaxLength } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
 
 export class SignupDto {
   @IsEmail()
@@ -13,9 +13,9 @@ export class SignupDto {
   @MaxLength(100)
   fullName: string;
 
-  @IsOptional()
+  // Required: each signup provisions its own tenant, which needs a name.
   @IsString()
   @MinLength(2)
   @MaxLength(100)
-  companyName?: string;
+  companyName: string;
 }

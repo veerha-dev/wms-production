@@ -8,8 +8,6 @@ import { SignupDto } from './dto/signup.dto';
 import { EmailService } from '../email/email.service';
 import { DatabaseService } from '../../database/database.service';
 
-const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
-
 @Injectable()
 export class AuthService {
   constructor(
@@ -27,13 +25,15 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const user = await this.repository.createUser(
-      dto.email,
-      dto.fullName,
+
+    // Self-signup provisions its own tenant. The signing-up user is the admin
+    // of that new tenant only — never of a pre-existing/shared one.
+    const { user } = await this.repository.createTenantWithAdmin({
+      companyName: dto.companyName,
+      email: dto.email,
+      fullName: dto.fullName,
       passwordHash,
-      'admin',
-      DEFAULT_TENANT_ID,
-    );
+    });
 
     const tokens = await this.generateTokens({
       sub: user.id,

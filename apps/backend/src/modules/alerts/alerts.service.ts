@@ -30,12 +30,12 @@ export class AlertsService {
     return this.repository.create(getCurrentTenantId(), dto);
   }
 
-  async acknowledge(id: string, acknowledgedBy?: string) {
+  async acknowledge(id: string, acknowledgedBy: string) {
     await this.findById(id);
     return this.repository.acknowledge(getCurrentTenantId(), id, acknowledgedBy);
   }
 
-  async acknowledgeAll(acknowledgedBy?: string) {
+  async acknowledgeAll(acknowledgedBy: string) {
     const count = await this.repository.acknowledgeAll(getCurrentTenantId(), acknowledgedBy);
     return { acknowledged: count };
   }

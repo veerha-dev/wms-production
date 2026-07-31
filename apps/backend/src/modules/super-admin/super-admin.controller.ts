@@ -5,7 +5,14 @@ import {
 import { SuperAdminService } from './super-admin.service';
 import { SuperAdminGuard } from './super-admin.guard';
 import { CreateTenantDto } from './dto';
+import { Public } from '../auth/decorators/public.decorator';
 
+// @Public() opts the whole controller out of the global JwtAuthGuard.
+// Super-admin tokens carry no tenantId, so the tenant-scoped JWT strategy
+// must not run here — every route except auth/login is instead protected
+// by its own @UseGuards(SuperAdminGuard), which verifies the JWT and the
+// is_super_admin flag itself.
+@Public()
 @Controller('api/v1/sa')
 export class SuperAdminController {
   constructor(private readonly service: SuperAdminService) {}

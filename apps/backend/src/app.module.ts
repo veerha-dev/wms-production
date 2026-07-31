@@ -1,5 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { TenantMiddleware } from './modules/common/tenant.middleware';
+import { HttpExceptionFilter } from './modules/common/http-exception.filter';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -88,6 +90,9 @@ import { PresenceModule } from './modules/presence/presence.module';
     PackConsolidationModule,
     PickWavesModule,
     PresenceModule,
+  ],
+  providers: [
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })
 export class AppModule implements NestModule {

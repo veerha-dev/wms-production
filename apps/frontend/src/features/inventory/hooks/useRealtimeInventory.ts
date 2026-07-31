@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { getAccessToken } from '@/shared/lib/api';
 import { useStockLevels } from './useStockLevels';
 import { useAuth } from '@/shared/contexts/AuthContext';
 import { useWMS } from '@/shared/contexts/WMSContext';
@@ -17,6 +18,7 @@ export function useRealtimeInventory(params?: Record<string, any>) {
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     socketRef.current = io(`${API_BASE_URL}/inventory`, {
       withCredentials: true,
+      auth: { token: getAccessToken() },
     });
 
     const socket = socketRef.current;
