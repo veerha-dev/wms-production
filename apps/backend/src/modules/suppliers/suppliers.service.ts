@@ -1,13 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { SuppliersRepository } from './suppliers.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 
 
 
 @Injectable()
 export class SuppliersService {
-  constructor(private repository: SuppliersRepository) {}
+  constructor(
+    private repository: SuppliersRepository,
+    private numbering: DocumentNumberingService,
+  ) {}
 
 
   async findAll(query: any) {
@@ -57,8 +61,13 @@ export class SuppliersService {
   async approve(id: string, approvedBy?: string) { return this.updateStatus(id, 'approved', { approvedBy, approvedAt: new Date() }); }
   async cancel(id: string) { return this.updateStatus(id, 'cancelled'); }
 
+  /**
+   * Issued by the tenant's configurable sequence (Settings > Document
+   * Numbering) instead of row count, which ignored the configured
+   * prefix/length and collided after a delete. Migration 078 backfills
+   * the counter past existing documents, so this is safe on upgrades.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `SUP-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'supplier');
   }
 }

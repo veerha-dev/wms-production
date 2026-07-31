@@ -53,6 +53,7 @@ const navItems = [
   { id: 'grn', name: 'Goods Receipt', icon: ClipboardCheck, path: '/inbound/grn', section: 'inbound' },
   { id: 'qc', name: 'QC Inspections', icon: Shield, path: '/inbound/qc', section: 'inbound' },
   { id: 'putaway', name: 'Putaway', icon: PackageOpen, path: '/inbound/putaway', section: 'inbound' },
+  { id: 'customers', name: 'Customers', icon: Users, path: '/outbound/customers', section: 'outbound' },
   { id: 'outbound', name: 'Sales Orders', icon: ArrowUpFromLine, path: '/outbound', section: 'outbound' },
   { id: 'picking', name: 'Pick Lists', icon: ListChecks, path: '/outbound/picking', section: 'outbound' },
   { id: 'waves', name: 'Wave Planning', icon: Workflow, path: '/outbound/waves', section: 'outbound' },
@@ -79,7 +80,17 @@ export function Sidebar() {
 
   const NavItemComponent = ({ item }: { item: typeof navItems[0] }) => {
     const Icon = item.icon;
-    const isActive = item.path === '/' ? location.pathname === '/' : location.pathname === item.path;
+    // Longest matching path wins so nested routes (e.g. /outbound/customers/:id)
+    // highlight their own entry rather than the section root.
+    const bestMatch = navItems
+      .filter(
+        (i) =>
+          i.path !== '/' &&
+          (location.pathname === i.path || location.pathname.startsWith(`${i.path}/`))
+      )
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    const isActive =
+      item.path === '/' ? location.pathname === '/' : bestMatch?.path === item.path;
     const isEnabled = canAccessSidebarItem(item.name);
 
     const content = (

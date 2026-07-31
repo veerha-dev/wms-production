@@ -23,6 +23,10 @@ export const ROUTE_PERMISSION_MAP: Record<string, string> = {
   '/inbound/qc': 'QC Inspections',
   '/inbound/putaway': 'Putaway',
   '/outbound': 'Sales Orders',
+  '/outbound/customers': 'Customers',
+  // ProtectedRoute matches pathnames exactly, so the parameterised detail route
+  // can never resolve here — CustomerDetailPage guards itself with canAccess().
+  '/outbound/customers/:id': 'Customers',
   '/outbound/picking': 'Pick Lists',
   '/outbound/packing': 'Packing',
   '/outbound/shipping': 'Shipments',
@@ -57,6 +61,7 @@ export const SIDEBAR_PERMISSION_MAP: Record<string, string> = {
   'Goods Receipt': 'GRN',
   'QC Inspections': 'QC Inspections',
   'Putaway': 'Putaway',
+  'Customers': 'Customers',
   'Sales Orders': 'Sales Orders',
   'Pick Lists': 'Pick Lists',
   'Packing': 'Packing',
@@ -69,6 +74,21 @@ export const SIDEBAR_PERMISSION_MAP: Record<string, string> = {
   'Analytics': 'Analytics',
   'Users': 'Users',
   'Settings': 'Settings',
+};
+
+/**
+ * Modules a role must never reach, enforced client-side.
+ * `canAccess` deliberately fails open when a permission row is missing, so
+ * hard rules from the spec are listed here instead of relying on seed data.
+ * Spec §7: Worker has no access to Customers, Sales Orders or Invoices —
+ * workers execute warehouse tasks and must not reach order or billing screens.
+ *
+ * Deliberately narrow: the fail-open default below stays, so a module whose
+ * permission row is simply missing from seed data does not lock out legitimate
+ * users. Only hard spec rules belong in this list.
+ */
+export const ROLE_MODULE_DENYLIST: Record<string, string[]> = {
+  worker: ['Customers', 'Sales Orders', 'Invoices'],
 };
 
 export function usePermissions() {
@@ -92,6 +112,9 @@ export function usePermissions() {
   const canAccess = useCallback((moduleName: string, action: string = 'view'): boolean => {
     // Admin always has full access
     if (role === 'admin') return true;
+
+    // Hard denials from the spec win over the permissive fallbacks below
+    if (role && ROLE_MODULE_DENYLIST[role]?.includes(moduleName)) return false;
 
     // If no permissions loaded yet, allow access (graceful degradation)
     if (permissions.length === 0) return true;

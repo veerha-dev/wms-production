@@ -8,12 +8,18 @@ interface ExportButtonProps<T extends Record<string, unknown>> extends Omit<Butt
   config: ImportExportConfig<T>;
   data: T[];
   filters?: Record<string, unknown>;
+  /** Export every record matching `filters` via `config.api.export`, not just `data`. */
+  serverSide?: boolean;
+  /** Total matching records, for the dialog copy when `serverSide` is on. */
+  totalCount?: number;
 }
 
 export function ExportButton<T extends Record<string, unknown>>({
   config,
   data,
   filters,
+  serverSide,
+  totalCount,
   children,
   ...buttonProps
 }: ExportButtonProps<T>) {
@@ -37,6 +43,8 @@ export function ExportButton<T extends Record<string, unknown>>({
         config={config}
         data={data}
         filters={filters}
+        serverSide={serverSide}
+        totalCount={totalCount}
       />
     </>
   );

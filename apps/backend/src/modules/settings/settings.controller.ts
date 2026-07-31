@@ -1,17 +1,20 @@
 import {
   Controller, Get, Patch, Post, Body, Param,
-  UseGuards, Request, ForbiddenException, HttpCode, HttpStatus,
+  UseGuards, Request, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { SettingsService } from './settings.service';
 import { getCurrentTenantId } from '../common/tenant.context';
 import {
   UpdateGeneralDto, UpdateNotificationsDto, UpdateAppearanceDto,
-  UpdateSecurityPrefsDto, UpdateTenantInfoDto,
+  UpdateSecurityPrefsDto, UpdateTenantInfoDto, UpdateApprovalRuleDto,
+  UpdateIntegrationDto, UpdateSecurityPolicyDto, UpdateNotificationConfigDto,
 } from './dto';
 
 @Controller('api/v1/settings')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class SettingsController {
   constructor(private readonly service: SettingsService) {}
 
@@ -47,17 +50,17 @@ export class SettingsController {
     return { success: true, data: prefs };
   }
 
-  // ─── Tenant ─────────────────────────────────────────────────────────────────
+  // ─── Tenant / Organization ──────────────────────────────────────────────────
 
   @Get('tenant')
-  async getTenantInfo(@Request() req: any) {
+  async getTenantInfo() {
     const data = await this.service.getTenantInfo(getCurrentTenantId());
     return { success: true, data };
   }
 
   @Patch('tenant')
-  async updateTenantInfo(@Request() req: any, @Body() dto: UpdateTenantInfoDto) {
-    if (req.user.role !== 'admin') throw new ForbiddenException('Only admins can update organization settings');
+  @Roles('admin')
+  async updateTenantInfo(@Body() dto: UpdateTenantInfoDto) {
     const data = await this.service.updateTenantInfo(getCurrentTenantId(), dto);
     return { success: true, data };
   }
@@ -71,38 +74,62 @@ export class SettingsController {
   }
 
   @Patch('security-policy')
-  async updateSecurityPolicy(@Request() req: any, @Body() body: Record<string, any>) {
-    if (req.user.role !== 'admin') throw new ForbiddenException('Only admins can update the security policy');
-    const data = await this.service.updateSecurityPolicy(getCurrentTenantId(), body);
+  @Roles('admin')
+  async updateSecurityPolicy(@Body() dto: UpdateSecurityPolicyDto) {
+    const data = await this.service.updateSecurityPolicy(getCurrentTenantId(), dto);
     return { success: true, data };
   }
 
   // ─── Integrations ────────────────────────────────────────────────────────────
 
   @Get('integrations')
-  async getIntegrations(@Request() req: any) {
+  async getIntegrations() {
     const data = await this.service.getIntegrations(getCurrentTenantId());
     return { success: true, data };
   }
 
   @Patch('integrations/:key')
-  async updateIntegration(
-    @Request() req: any,
-    @Param('key') key: string,
-    @Body() body: { connected: boolean; connectionDetails?: string },
-  ) {
-    if (req.user.role !== 'admin') throw new ForbiddenException('Only admins can manage integrations');
-    await this.service.updateIntegration(getCurrentTenantId(), key, body.connected, body.connectionDetails);
-    return { success: true };
+  @Roles('admin')
+  async updateIntegration(@Param('key') key: string, @Body() dto: UpdateIntegrationDto) {
+    await this.service.updateIntegration(
+      getCurrentTenantId(),
+      key,
+      dto.connected,
+      dto.connectionDetails,
+    );
+    const data = await this.service.getIntegrations(getCurrentTenantId());
+    return { success: true, data };
   }
 
   // ─── Test Notification ───────────────────────────────────────────────────────
 
   @Post('notifications/test')
   @HttpCode(HttpStatus.OK)
-  async sendTestNotification(@Request() req: any) {
+  async sendTestNotification() {
     await this.service.sendTestNotification(getCurrentTenantId());
     return { success: true, message: 'Test notification sent' };
+  }
+
+  // ─── Tenant Notification Config (per alert type) ────────────────────────────
+
+  @Get('notifications-config')
+  async getNotificationsConfig() {
+    const data = await this.service.getNotificationSettings(getCurrentTenantId());
+    return { success: true, data, meta: { total: data.length } };
+  }
+
+  @Patch('notifications-config/:alertType')
+  @Roles('admin')
+  async updateNotificationsConfig(
+    @Param('alertType') alertType: string,
+    @Body() dto: UpdateNotificationConfigDto,
+  ) {
+    const data = await this.service.updateNotificationSetting(
+      getCurrentTenantId(),
+      alertType,
+      dto,
+    );
+    return { success: true, data };
   }
 
   // ─── Tenant Approval Rules ──────────────────────────────────────────────────
@@ -114,18 +141,12 @@ export class SettingsController {
   }
 
   @Patch('approval-rules/:module')
+  @Roles('admin')
   async updateApprovalRule(
-    @Request() req: any,
     @Param('module') module: string,
-    @Body() body: { thresholdAmount: number; isActive: boolean },
+    @Body() dto: UpdateApprovalRuleDto,
   ) {
-    if (req.user.role !== 'admin') throw new ForbiddenException('Only admins can update approval rules');
-    const data = await this.service.updateApprovalRule(
-      getCurrentTenantId(),
-      module,
-      body.thresholdAmount,
-      body.isActive,
-    );
+    const data = await this.service.updateApprovalRule(getCurrentTenantId(), module, dto);
     return { success: true, data };
   }
 }

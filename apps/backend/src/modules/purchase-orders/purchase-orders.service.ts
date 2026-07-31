@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PurchaseOrdersRepository } from './purchase-orders.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 interface AuthUser {
   id: string;
@@ -10,7 +11,10 @@ interface AuthUser {
 
 @Injectable()
 export class PurchaseOrdersService {
-  constructor(private repository: PurchaseOrdersRepository) {}
+  constructor(
+    private repository: PurchaseOrdersRepository,
+    private numbering: DocumentNumberingService,
+  ) {}
 
   async findAll(query: any) {
     const { page = 1, limit = 50 } = query;
@@ -148,8 +152,13 @@ export class PurchaseOrdersService {
     return this.updateStatus(id, 'cancelled');
   }
 
+  /**
+   * Issued by the tenant's configurable sequence (Settings > Document
+   * Numbering) instead of row count, which ignored the configured
+   * prefix/length and collided after a delete. Migration 078 backfills
+   * the counter past existing documents, so this is safe on upgrades.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `PO-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'purchase_order');
   }
 }

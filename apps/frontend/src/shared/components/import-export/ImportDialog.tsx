@@ -149,13 +149,18 @@ export function ImportDialog({
 
       for (let i = 0; i < transformedData.length; i += batchSize) {
         const batch = transformedData.slice(i, i + batchSize);
-        const batchStartRow = i + 1;
+        // Backends report `row` 1-based WITHIN the batch (`i + 1`), so the
+        // batch offset must be the raw index — `i + 1` double-counted it and
+        // every reported row number came out one too high.
+        const batchStartRow = i;
 
         try {
           const response = await api.post(config.api.bulkCreate, { items: batch });
           const result = response.data.data;
 
-          successCount += result.created || batch.length;
+          // `??` not `||` — a batch where every row failed returns created: 0,
+          // which is falsy and used to report the whole batch as imported.
+          successCount += result.created ?? batch.length;
           if (result.errors) {
             result.errors.forEach((err: { row: number; message: string }) => {
               errors.push({ row: batchStartRow + err.row, message: err.message });

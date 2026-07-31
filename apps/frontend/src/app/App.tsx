@@ -29,6 +29,8 @@ import WorkflowsPage from "@/features/operations/pages/WorkflowsPage";
 import OperationsPage from "@/features/operations/pages/OperationsPage";
 import InvoicesPage from "@/features/invoices/pages/InvoicesPage";
 // Outbound
+import CustomersPage from "@/features/customers/pages/CustomersPage";
+import CustomerDetailPage from "@/features/customers/pages/CustomerDetailPage";
 import ReturnsPage from "@/features/outbound/pages/ReturnsPage";
 import SalesOrdersPage from "@/features/outbound/pages/SalesOrdersPage";
 import PickListsPage from "@/features/outbound/pages/PickListsPage";
@@ -132,6 +134,8 @@ const App = () => (
             <Route path="/inbound/putaway" element={<ProtectedLayout><PutawayPage /></ProtectedLayout>} />
 
             <Route path="/outbound" element={<ProtectedLayout><SalesOrdersPage /></ProtectedLayout>} />
+            <Route path="/outbound/customers" element={<ProtectedLayout><CustomersPage /></ProtectedLayout>} />
+            <Route path="/outbound/customers/:id" element={<ProtectedLayout><CustomerDetailPage /></ProtectedLayout>} />
             <Route path="/outbound/picking" element={<ProtectedLayout><PickListsPage /></ProtectedLayout>} />
             <Route path="/outbound/packing" element={<ProtectedLayout><PackingPage /></ProtectedLayout>} />
             <Route path="/outbound/shipping" element={<ProtectedLayout><ShipmentsPage /></ProtectedLayout>} />

@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { getCurrentTenantId } from '../common/tenant.context';
-import { UpdateGeneralDto, UpdateNotificationsDto, UpdateAppearanceDto, UpdateSecurityPrefsDto, UpdateTenantInfoDto } from './dto';
+import {
+  UpdateGeneralDto, UpdateNotificationsDto, UpdateAppearanceDto,
+  UpdateSecurityPrefsDto, UpdateTenantInfoDto, UpdateApprovalRuleDto,
+  UpdateNotificationConfigDto,
+} from './dto';
+import { NOTIFICATION_ALERT_TYPES, findAlertType } from './notification-alert-types';
 
 const toSnake = (s: string) => s.replace(/([A-Z])/g, '_$1').toLowerCase();
 
@@ -20,13 +25,91 @@ function buildUpsertFields(dto: Record<string, any>): { cols: string[]; vals: an
   return { cols, vals, sets };
 }
 
+/**
+ * Integration cards shown in Settings > Integrations (spec Tab 7), in display
+ * order. `providers` drives the card sub-text in the UI.
+ */
 const INTEGRATION_DEFS = [
-  { key: 'erp_connected',       name: 'ERP System',       description: 'SAP, Oracle, or custom ERP integration' },
-  { key: 'shipping_connected',  name: 'Shipping Carriers', description: 'FedEx, UPS, DHL courier integration' },
-  { key: 'ecommerce_connected', name: 'E-commerce',        description: 'Shopify, WooCommerce, Magento' },
-  { key: 'barcode_connected',   name: 'Barcode / RFID',    description: 'Scanner and reader hardware integration' },
-  { key: 'accounting_connected',name: 'Accounting',        description: 'QuickBooks, Xero, Tally integration' },
+  {
+    key: 'shipping_connected',
+    name: 'Shipping Carriers',
+    description: 'Shiprocket, Blue Dart, DTDC, Delhivery, Ecom Express',
+    providers: ['Shiprocket', 'Blue Dart', 'DTDC', 'Delhivery', 'Ecom Express'],
+  },
+  {
+    key: 'ecommerce_connected',
+    name: 'E-commerce',
+    description: 'Shopify, Amazon India, Flipkart, WooCommerce, Meesho',
+    providers: ['Shopify', 'Amazon India', 'Flipkart', 'WooCommerce', 'Meesho'],
+  },
+  {
+    key: 'accounting_connected',
+    name: 'Accounting',
+    description: 'Tally, Zoho Books, QuickBooks',
+    providers: ['Tally', 'Zoho Books', 'QuickBooks'],
+  },
+  {
+    // Key intentionally has no `_connected` suffix — this is the contract the
+    // Settings UI's GST Compliance card was built against.
+    key: 'gst_compliance',
+    name: 'GST Compliance',
+    description: 'E-Invoice and E-Way Bill via a GSP — credentials stored encrypted',
+    providers: ['E-Invoice (IRP)', 'E-Way Bill'],
+  },
+  {
+    key: 'barcode_connected',
+    name: 'Barcode / RFID',
+    description: 'Scanner and reader hardware integration',
+    providers: [],
+  },
+  {
+    key: 'erp_connected',
+    name: 'ERP System',
+    description: 'SAP, Oracle, or custom ERP integration',
+    providers: ['SAP', 'Oracle', 'Custom'],
+  },
 ];
+
+/**
+ * The five approval rules of spec Tab 4 §8, one row per `module` in
+ * `approval_rules`. Rows are seeded lazily on first read so the UI always gets
+ * all five back, created or not.
+ *
+ * NOTE: purchase-order enforcement (purchase-orders.service) reads the legacy
+ * module key `purchase_orders`. `purchase_order` writes are mirrored onto that
+ * legacy row by updateApprovalRule so enforcement stays in sync.
+ */
+const APPROVAL_RULE_MODULES: {
+  module: string;
+  label: string;
+  thresholdAmount: number;
+  thresholdUnits: number | null;
+}[] = [
+  { module: 'stock_adjustment_units', label: 'Stock adjustment (units)', thresholdAmount: 0, thresholdUnits: 100 },
+  { module: 'stock_adjustment_value', label: 'Stock adjustment (value ₹)', thresholdAmount: 0, thresholdUnits: null },
+  { module: 'inter_warehouse_transfer', label: 'Inter-warehouse transfer', thresholdAmount: 0, thresholdUnits: null },
+  { module: 'purchase_order', label: 'Purchase order above amount', thresholdAmount: 0, thresholdUnits: null },
+  { module: 'cycle_count_variance', label: 'Cycle count variance', thresholdAmount: 0, thresholdUnits: null },
+];
+
+const LEGACY_PO_MODULE = 'purchase_orders';
+
+/** Whitelist for organization fields on `tenants` (Settings > Organization). */
+const TENANT_INFO_FIELDS: Record<string, string> = {
+  companyName: 'company_name',
+  companyType: 'company_type',
+  logoUrl: 'logo_url',
+  address: 'address',
+  city: 'city',
+  state: 'state',
+  pincode: 'pincode',
+  country: 'country',
+  phone: 'phone',
+  email: 'email',
+  gstNumber: 'gst_number',
+  panNumber: 'pan_number',
+  fyStartMonth: 'fy_start_month',
+};
 
 @Injectable()
 export class SettingsService {
@@ -114,10 +197,19 @@ export class SettingsService {
       companyType: row.company_type || null,
       name: row.name,
       industry: row.industry || null,
+      logoUrl: row.logo_url || null,
       address: row.address || null,
       city: row.city || null,
+      state: row.state || null,
+      pincode: row.pincode || null,
       country: row.country || null,
+      phone: row.phone || null,
+      email: row.email || row.admin_email || null,
       gstNumber: row.gst_number || null,
+      panNumber: row.pan_number || null,
+      fyStartMonth: row.fy_start_month ?? 4,
+      // Alias the Settings UI reads.
+      financialYearStartMonth: row.fy_start_month ?? 4,
       planName: row.plan_name || 'Starter',
       planCode: row.plan_code || 'starter',
       maxWarehouses: row.max_warehouses || 3,
@@ -203,32 +295,39 @@ export class SettingsService {
   }
 
   async updateTenantInfo(tenantId: string, dto: UpdateTenantInfoDto) {
-    const featureFlagsUpdate = dto.industry
-      ? `feature_flags = jsonb_set(COALESCE(feature_flags, '{}'), '{industry}', to_jsonb($8::text)),`
-      : '';
+    const sets: string[] = [];
+    const vals: any[] = [];
+    let i = 1;
 
-    await this.db.query(
-      `UPDATE tenants SET
-        company_name = COALESCE($2, company_name),
-        company_type = COALESCE($3, company_type),
-        address      = COALESCE($4, address),
-        city         = COALESCE($5, city),
-        country      = COALESCE($6, country),
-        gst_number   = COALESCE($7, gst_number),
-        ${featureFlagsUpdate}
-        updated_at   = NOW()
-       WHERE id = $1`,
-      [
-        tenantId,
-        dto.companyName || null,
-        dto.companyType || null,
-        dto.address || null,
-        dto.city || null,
-        dto.country || null,
-        dto.gstNumber || null,
-        dto.industry || null,
-      ],
-    );
+    // The UI sends `financialYearStartMonth`; both spellings hit fy_start_month,
+    // so fold them into one key or the UPDATE would assign the column twice.
+    const source: Record<string, any> = { ...(dto as Record<string, any>) };
+    if (source.financialYearStartMonth !== undefined && source.fyStartMonth === undefined) {
+      source.fyStartMonth = source.financialYearStartMonth;
+    }
+
+    for (const [key, col] of Object.entries(TENANT_INFO_FIELDS)) {
+      const value = source[key];
+      if (value === undefined) continue;
+      sets.push(`${col} = $${i++}`);
+      vals.push(value);
+    }
+
+    // `industry` lives in the feature_flags JSONB, not a column of its own.
+    if (dto.industry !== undefined) {
+      sets.push(
+        `feature_flags = jsonb_set(COALESCE(feature_flags, '{}'), '{industry}', to_jsonb($${i++}::text), true)`,
+      );
+      vals.push(dto.industry);
+    }
+
+    if (sets.length > 0) {
+      vals.push(tenantId);
+      await this.db.query(
+        `UPDATE tenants SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${i}`,
+        vals,
+      );
+    }
     return this.getTenantInfo(tenantId);
   }
 
@@ -244,6 +343,7 @@ export class SettingsService {
       key: def.key,
       name: def.name,
       description: def.description,
+      providers: def.providers,
       connected: flags[def.key] === true || flags[def.key] === 'true',
       connectionDetails: flags[`${def.key}_details`] || null,
     }));
@@ -251,7 +351,11 @@ export class SettingsService {
 
   async updateIntegration(tenantId: string, key: string, connected: boolean, connectionDetails?: string) {
     const validKeys = INTEGRATION_DEFS.map((d) => d.key);
-    if (!validKeys.includes(key)) throw new Error(`Invalid integration key: ${key}`);
+    if (!validKeys.includes(key)) {
+      throw new BadRequestException(
+        `Invalid integration key "${key}". Expected one of: ${validKeys.join(', ')}`,
+      );
+    }
 
     let query = `UPDATE tenants SET
       feature_flags = jsonb_set(COALESCE(feature_flags, '{}'), '{${key}}', $2::text::jsonb, true),
@@ -284,19 +388,34 @@ export class SettingsService {
 
   // ─── Approval Rules ─────────────────────────────────────────────────────────
 
+  /** Creates any of the five catalog rules this tenant is missing. */
+  private async seedApprovalRules(tenantId: string): Promise<void> {
+    const params: any[] = [tenantId];
+    const tuples = APPROVAL_RULE_MODULES.map((r) => {
+      const base = params.length + 1;
+      params.push(r.module, r.thresholdAmount, r.thresholdUnits);
+      return `($1, $${base}, $${base + 1}, $${base + 2})`;
+    });
+    await this.db.query(
+      `INSERT INTO approval_rules (tenant_id, module, threshold_amount, threshold_units)
+       VALUES ${tuples.join(', ')}
+       ON CONFLICT (tenant_id, module) DO NOTHING`,
+      params,
+    );
+  }
+
   async getApprovalRules(tenantId: string) {
+    await this.seedApprovalRules(tenantId);
     const res = await this.db.query(
       `SELECT * FROM approval_rules WHERE tenant_id = $1`,
       [tenantId],
     );
-    return res.rows.map(row => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      module: row.module,
-      thresholdAmount: Number(row.threshold_amount || 0),
-      isActive: row.is_active,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+    const byModule = new Map<string, any>(res.rows.map((r: any) => [r.module, r]));
+    // Catalog order and labels; the internal `purchase_orders` row is not exposed.
+    return APPROVAL_RULE_MODULES.map((def) => ({
+      ...mapApprovalRule(byModule.get(def.module)),
+      module: def.module,
+      label: def.label,
     }));
   }
 
@@ -305,39 +424,194 @@ export class SettingsService {
       `SELECT * FROM approval_rules WHERE tenant_id = $1 AND module = $2`,
       [tenantId, module],
     );
-    const row = res.rows[0];
-    if (!row) return null;
-    return {
-      id: row.id,
-      tenantId: row.tenant_id,
-      module: row.module,
-      thresholdAmount: Number(row.threshold_amount || 0),
-      isActive: row.is_active,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    return res.rows[0] ? mapApprovalRule(res.rows[0]) : null;
   }
 
-  async updateApprovalRule(tenantId: string, module: string, thresholdAmount: number, isActive: boolean) {
-    const res = await this.db.query(
-      `INSERT INTO approval_rules (tenant_id, module, threshold_amount, is_active)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (tenant_id, module) 
-       DO UPDATE SET threshold_amount = $3, is_active = $4, updated_at = NOW()
-       RETURNING *`,
-      [tenantId, module, thresholdAmount, isActive],
+  async updateApprovalRule(tenantId: string, module: string, dto: UpdateApprovalRuleDto) {
+    // Ensure the row exists, then patch only the supplied fields.
+    await this.db.query(
+      `INSERT INTO approval_rules (tenant_id, module) VALUES ($1, $2)
+       ON CONFLICT (tenant_id, module) DO NOTHING`,
+      [tenantId, module],
     );
-    const row = res.rows[0];
+
+    const fieldMap: Record<string, string> = {
+      thresholdAmount: 'threshold_amount',
+      thresholdUnits: 'threshold_units',
+      transferRequiresApproval: 'transfer_requires_approval',
+      cycleCountAutoApprovePct: 'cycle_count_auto_approve_pct',
+      isActive: 'is_active',
+    };
+
+    const sets: string[] = [];
+    const vals: any[] = [];
+    let i = 1;
+    for (const [key, col] of Object.entries(fieldMap)) {
+      const value = (dto as Record<string, any>)[key];
+      if (value === undefined) continue;
+      sets.push(`${col} = $${i++}`);
+      vals.push(value);
+    }
+
+    if (sets.length > 0) {
+      vals.push(tenantId, module);
+      await this.db.query(
+        `UPDATE approval_rules SET ${sets.join(', ')}, updated_at = NOW()
+          WHERE tenant_id = $${i} AND module = $${i + 1}`,
+        vals,
+      );
+
+      // Keep the legacy row purchase-orders.service reads in sync.
+      if (module === 'purchase_order') {
+        const legacyVals = [...vals];
+        legacyVals[legacyVals.length - 1] = LEGACY_PO_MODULE;
+        await this.db.query(
+          `INSERT INTO approval_rules (tenant_id, module) VALUES ($1, $2)
+           ON CONFLICT (tenant_id, module) DO NOTHING`,
+          [tenantId, LEGACY_PO_MODULE],
+        );
+        await this.db.query(
+          `UPDATE approval_rules SET ${sets.join(', ')}, updated_at = NOW()
+            WHERE tenant_id = $${i} AND module = $${i + 1}`,
+          legacyVals,
+        );
+      }
+    }
+    return this.getApprovalRule(tenantId, module);
+  }
+
+  // ─── Tenant Notification Settings ───────────────────────────────────────────
+
+  /**
+   * Inserts any alert types from the code catalog that this tenant does not yet
+   * have a row for. Runs on every read, so adding an alert type to
+   * NOTIFICATION_ALERT_TYPES needs no migration.
+   */
+  private async seedNotificationSettings(tenantId: string): Promise<void> {
+    const params: any[] = [tenantId];
+    const tuples = NOTIFICATION_ALERT_TYPES.map((def) => {
+      const base = params.length + 1;
+      params.push(
+        def.key,
+        def.defaultEnabled,
+        def.defaultEmailEnabled,
+        def.defaultRecipients,
+        JSON.stringify(def.defaultConfig ?? {}),
+      );
+      return `($1, $${base}, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}::jsonb)`;
+    });
+
+    await this.db.query(
+      `INSERT INTO tenant_notification_settings
+         (tenant_id, alert_type, enabled, email_enabled, recipients, config)
+       VALUES ${tuples.join(', ')}
+       ON CONFLICT (tenant_id, alert_type) DO NOTHING`,
+      params,
+    );
+  }
+
+  async getNotificationSettings(tenantId: string) {
+    await this.seedNotificationSettings(tenantId);
+    const res = await this.db.query(
+      `SELECT * FROM tenant_notification_settings WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    const byKey = new Map<string, any>(res.rows.map((r: any) => [r.alert_type, r]));
+
+    // Ordered and labelled by the code catalog; unknown legacy rows are dropped.
+    return NOTIFICATION_ALERT_TYPES.map((def) => {
+      const row = byKey.get(def.key);
+      return {
+        alertType: def.key,
+        label: def.label,
+        description: def.description,
+        group: def.group,
+        enabled: row ? row.enabled : def.defaultEnabled,
+        emailEnabled: row ? row.email_enabled : def.defaultEmailEnabled,
+        recipients: row ? row.recipients : def.defaultRecipients,
+        config: row ? row.config : def.defaultConfig,
+        updatedAt: row?.updated_at ?? null,
+      };
+    });
+  }
+
+  async updateNotificationSetting(
+    tenantId: string,
+    alertType: string,
+    dto: UpdateNotificationConfigDto,
+  ) {
+    if (!findAlertType(alertType)) {
+      throw new BadRequestException(`Unknown alert type "${alertType}"`);
+    }
+    await this.seedNotificationSettings(tenantId);
+
+    const fieldMap: Record<string, string> = {
+      enabled: 'enabled',
+      emailEnabled: 'email_enabled',
+      recipients: 'recipients',
+    };
+
+    const sets: string[] = [];
+    const vals: any[] = [];
+    let i = 1;
+    for (const [key, col] of Object.entries(fieldMap)) {
+      const value = (dto as Record<string, any>)[key];
+      if (value === undefined) continue;
+      sets.push(`${col} = $${i++}`);
+      vals.push(value);
+    }
+    // `config` is merged, not replaced, so a partial PATCH keeps other keys.
+    if (dto.config !== undefined) {
+      sets.push(`config = COALESCE(config, '{}'::jsonb) || $${i++}::jsonb`);
+      vals.push(JSON.stringify(dto.config));
+    }
+
+    if (sets.length > 0) {
+      vals.push(tenantId, alertType);
+      await this.db.query(
+        `UPDATE tenant_notification_settings SET ${sets.join(', ')}, updated_at = NOW()
+          WHERE tenant_id = $${i} AND alert_type = $${i + 1}`,
+        vals,
+      );
+    }
+
+    const all = await this.getNotificationSettings(tenantId);
+    return all.find((s) => s.alertType === alertType) ?? null;
+  }
+}
+
+function mapApprovalRule(row: any) {
+  if (!row) {
     return {
-      id: row.id,
-      tenantId: row.tenant_id,
-      module: row.module,
-      thresholdAmount: Number(row.threshold_amount || 0),
-      isActive: row.is_active,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      id: null,
+      tenantId: null,
+      module: null,
+      thresholdAmount: 0,
+      thresholdUnits: null,
+      transferRequiresApproval: true,
+      cycleCountAutoApprovePct: null,
+      isActive: true,
+      createdAt: null,
+      updatedAt: null,
     };
   }
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    module: row.module,
+    thresholdAmount: Number(row.threshold_amount || 0),
+    thresholdUnits: row.threshold_units === null || row.threshold_units === undefined
+      ? null
+      : Number(row.threshold_units),
+    transferRequiresApproval: row.transfer_requires_approval ?? true,
+    cycleCountAutoApprovePct:
+      row.cycle_count_auto_approve_pct === null || row.cycle_count_auto_approve_pct === undefined
+        ? null
+        : Number(row.cycle_count_auto_approve_pct),
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function mapPolicy(row: any) {

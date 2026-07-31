@@ -2,7 +2,16 @@ import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, HttpCode
 import { PickListsService } from './pick-lists.service';
 import { CreatePickListDto, GeneratePickListDto, UpdatePickListDto, QueryPickListDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
+/**
+ * Deliberately NOT locked down at the controller level.
+ *
+ * A worker's whole job lives on this resource: they list their pick lists,
+ * open one, and run assign / start / complete / pick / scan-item. Only the
+ * planning operations — hand-authoring, editing or deleting a pick list, and
+ * wave generation — are restricted to admin + manager.
+ */
 @Controller('api/v1/pick-lists')
 export class PickListsController {
   constructor(private readonly service: PickListsService) {}
@@ -21,17 +30,21 @@ export class PickListsController {
   async findOne(@Param('id') id: string) { return { success: true, data: await this.service.findOne(id) }; }
 
   @Post()
+  @Roles('admin', 'manager')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreatePickListDto) { return { success: true, data: await this.service.create(dto) }; }
 
   @Put(':id')
+  @Roles('admin', 'manager')
   async update(@Param('id') id: string, @Body() dto: UpdatePickListDto) { return { success: true, data: await this.service.update(id, dto) }; }
 
   @Delete(':id')
+  @Roles('admin', 'manager')
   async remove(@Param('id') id: string) { await this.service.remove(id); return { success: true, data: { id } }; }
 
   @Post('generate')
   @UseGuards(JwtAuthGuard)
+  @Roles('admin', 'manager')
   @HttpCode(HttpStatus.CREATED)
   async generate(@Body() dto: GeneratePickListDto, @Req() req: any) { return { success: true, data: await this.service.generate(dto, req.user) }; }
 

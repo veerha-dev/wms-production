@@ -7,7 +7,8 @@ import { Textarea } from '@/shared/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog';
 import { Badge } from '@/shared/components/ui/badge';
-import { useCustomers } from '@/features/inventory/hooks/useCustomers';
+import { useCustomers } from '@/features/customers/hooks/useCustomers';
+import { usePermissions } from '@/shared/hooks/usePermissions';
 import { useSuppliers } from '@/features/suppliers/hooks/useSuppliers';
 import { usePurchaseOrders } from '@/features/inbound/hooks/usePurchaseOrders';
 import { useSalesOrders } from '@/features/outbound/hooks/useSalesOrders';
@@ -58,7 +59,12 @@ export function InvoiceForm({ open, onOpenChange, onSubmit, isLoading, defaultWa
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<LineItem[]>([emptyItem()]);
 
-  const { data: customersData } = useCustomers();
+  // This dialog stays mounted while closed, and /api/v1/customers is
+  // admin/manager-only — an ungated fetch 403s for every worker on /invoices.
+  const { canAccess } = usePermissions();
+  const { data: customersData } = useCustomers(undefined, {
+    enabled: open && canAccess('Customers', 'view'),
+  });
   const { data: suppliersData } = useSuppliers();
   const { data: posData } = usePurchaseOrders();
   const { data: sosData } = useSalesOrders();

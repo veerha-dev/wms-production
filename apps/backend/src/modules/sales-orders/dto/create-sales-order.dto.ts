@@ -26,6 +26,11 @@ export class CreateSalesOrderDto {
   @IsOptional() @IsString() expectedDeliveryDate?: string;
   @IsOptional() @IsString() shipping_address?: string;
   @IsOptional() @IsString() shippingAddress?: string;
+  /** Saved customer_addresses row; omit for a one-off typed address. */
+  @IsOptional() @IsUUID() shipping_address_id?: string;
+  @IsOptional() @IsUUID() shippingAddressId?: string;
+  @IsOptional() @IsString() payment_terms?: string;
+  @IsOptional() @IsString() paymentTerms?: string;
   @IsOptional() @IsString() priority?: string;
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SalesOrderItemDto)

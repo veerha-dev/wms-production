@@ -4,6 +4,9 @@ import { TenantMiddleware } from './modules/common/tenant.middleware';
 import { HttpExceptionFilter } from './modules/common/http-exception.filter';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from './database/database.module';
+import { DocumentNumberingModule } from './modules/document-numbering/document-numbering.module';
+import { OperationsSettingsModule } from './modules/operations-settings/operations-settings.module';
+import { MastersModule } from './modules/masters/masters.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { WarehousesModule } from './modules/warehouses/warehouses.module';
 import { ZonesModule } from './modules/zones/zones.module';
@@ -51,6 +54,9 @@ import { PresenceModule } from './modules/presence/presence.module';
       envFilePath: '.env',
     }),
     DatabaseModule,
+    DocumentNumberingModule,
+    OperationsSettingsModule,
+    MastersModule,
     EmailModule,
     AuthModule,
     WarehousesModule,

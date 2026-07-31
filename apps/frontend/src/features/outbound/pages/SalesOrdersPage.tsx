@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppLayout } from '@/shared/components/layout/AppLayout';
-import { Plus, ShoppingCart, CheckCircle, Clock, Package, Truck, XCircle } from 'lucide-react';
+import { Plus, ShoppingCart, CheckCircle, Clock, Package, Truck, XCircle, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { Button } from '@/shared/components/ui/button';
 import { Badge } from '@/shared/components/ui/badge';
@@ -15,6 +15,21 @@ import { useSalesOrders, useOrderStats, useCreateOrder, useConfirmOrder, useCanc
 import { useSKUs } from '@/features/inventory/hooks/useSKUs';
 import { useWarehouses } from '@/features/warehouse/hooks/useWarehouses';
 import { safeParseInt, safeParseFloat } from '@/shared/utils/input';
+import { CustomerCombobox } from '@/features/customers/components/CustomerCombobox';
+import { CustomerFormDialog } from '@/features/customers/components/CustomerFormDialog';
+import {
+  useCustomer,
+  useCustomerAddresses,
+  useCreditCheck,
+} from '@/features/customers/hooks/useCustomers';
+import { useDebouncedValue } from '@/features/customers/hooks/useDebouncedValue';
+import {
+  formatAddress,
+  formatCustomerAddress,
+  formatCurrency,
+  formatPaymentTerms,
+  type CustomerSearchResult,
+} from '@/features/customers/types';
 
 export default function SalesOrdersPage() {
   const { toast } = useToast();
@@ -243,22 +258,119 @@ export default function SalesOrdersPage() {
   );
 }
 
+const MANUAL_ADDRESS = '__manual__';
+
+const emptyOrderForm = () => ({
+  customer_name: '',
+  customer_code: '',
+  customer_contact: '',
+  customer_address: '',
+  customer_gstin: '',
+  payment_terms: '',
+  shipping_address: '',
+  warehouse_id: '',
+  expected_delivery_date: '',
+  priority: 'medium',
+  notes: '',
+  items: [{ sku_id: '', ordered_quantity: 1, unit_price: 0, tax_percentage: 0, notes: '' }],
+});
+
 function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
   const { toast } = useToast();
-  const [formData, setFormData] = useState({
-    customer_name: '',
-    customer_code: '',
-    customer_contact: '',
-    customer_address: '',
-    warehouse_id: '',
-    expected_delivery_date: '',
-    priority: 'medium',
-    notes: '',
-    items: [{ sku_id: '', ordered_quantity: 1, unit_price: 0, tax_percentage: 0, notes: '' }],
-  });
+  const [formData, setFormData] = useState(emptyOrderForm);
+
+  // A selected saved customer (spec §6). Null keeps the original free-text path
+  // alive for walk-in / one-off B2C orders.
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSearchResult | null>(null);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [shippingAddressId, setShippingAddressId] = useState<string>(MANUAL_ADDRESS);
 
   const { data: skus } = useSKUs();
   const { data: warehouses } = useWarehouses();
+  const { data: customerDetail } = useCustomer(selectedCustomer?.id);
+  const { data: savedAddresses = [] } = useCustomerAddresses(selectedCustomer?.id);
+
+  // Start from a clean slate every time the dialog is opened.
+  useEffect(() => {
+    if (!open) return;
+    setFormData(emptyOrderForm());
+    setSelectedCustomer(null);
+    setShippingAddressId(MANUAL_ADDRESS);
+  }, [open]);
+
+  // Auto-fill from the selected customer. Uses a functional update so nothing
+  // already typed into the rest of the order form is lost.
+  useEffect(() => {
+    if (!customerDetail) return;
+    setFormData((prev) => ({
+      ...prev,
+      customer_name: customerDetail.name || prev.customer_name,
+      customer_code: customerDetail.code || '',
+      customer_contact: customerDetail.contactPerson || customerDetail.phone || '',
+      customer_gstin: customerDetail.gstNumber || '',
+      payment_terms: customerDetail.paymentTerms || '',
+      customer_address: formatCustomerAddress(customerDetail),
+    }));
+  }, [customerDetail]);
+
+  // Default the shipping dropdown to the customer's default (or first) address.
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setShippingAddressId(MANUAL_ADDRESS);
+      return;
+    }
+    if (savedAddresses.length === 0) {
+      setShippingAddressId(MANUAL_ADDRESS);
+      return;
+    }
+    const preferred = savedAddresses.find((a) => a.isDefault) || savedAddresses[0];
+    setShippingAddressId(preferred.id);
+  }, [selectedCustomer?.id, savedAddresses]);
+
+  const chosenAddress = useMemo(
+    () => savedAddresses.find((a) => a.id === shippingAddressId) || null,
+    [savedAddresses, shippingAddressId]
+  );
+
+  const orderTotal = useMemo(
+    () =>
+      formData.items.reduce((sum, item) => {
+        const line = Number(item.ordered_quantity || 0) * Number(item.unit_price || 0);
+        return sum + line + (line * Number(item.tax_percentage || 0)) / 100;
+      }, 0),
+    [formData.items]
+  );
+  const debouncedTotal = useDebouncedValue(orderTotal, 500);
+  const { data: creditCheck } = useCreditCheck(selectedCustomer?.id, debouncedTotal);
+
+  const resetCustomer = () => {
+    setSelectedCustomer(null);
+    setShippingAddressId(MANUAL_ADDRESS);
+    setFormData((prev) => ({
+      ...prev,
+      customer_name: '',
+      customer_code: '',
+      customer_contact: '',
+      customer_gstin: '',
+      payment_terms: '',
+      customer_address: '',
+      shipping_address: '',
+    }));
+  };
+
+  const handleSelectCustomer = (customer: CustomerSearchResult) => {
+    setSelectedCustomer(customer);
+    // Seed immediately from the lightweight search hit; the detail fetch fills
+    // in contact person and billing address a moment later.
+    setFormData((prev) => ({
+      ...prev,
+      customer_name: customer.name || '',
+      customer_code: customer.code || '',
+      customer_contact: prev.customer_contact || customer.phone || '',
+      customer_gstin: customer.gstNumber || '',
+      payment_terms: customer.paymentTerms || prev.payment_terms,
+    }));
+  };
 
   const addItem = () => {
     setFormData({
@@ -299,10 +411,34 @@ function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
       });
       return;
     }
-    onSubmit(formData);
+
+    const usingSavedAddress = !!chosenAddress && shippingAddressId !== MANUAL_ADDRESS;
+    const shippingText = usingSavedAddress
+      ? formatAddress(chosenAddress)
+      : formData.shipping_address || formData.customer_address;
+
+    // UUID fields must be omitted rather than sent empty.
+    const payload: Record<string, any> = {
+      customer_name: formData.customer_name,
+      customer_code: formData.customer_code || undefined,
+      customer_contact: formData.customer_contact || undefined,
+      customer_address: formData.customer_address || undefined,
+      shipping_address: shippingText || undefined,
+      payment_terms: formData.payment_terms || undefined,
+      warehouse_id: formData.warehouse_id,
+      expected_delivery_date: formData.expected_delivery_date || undefined,
+      priority: formData.priority,
+      notes: formData.notes || undefined,
+      items: formData.items,
+    };
+    if (selectedCustomer?.id) payload.customer_id = selectedCustomer.id;
+    if (usingSavedAddress) payload.shipping_address_id = chosenAddress!.id;
+
+    onSubmit(payload);
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -310,6 +446,62 @@ function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
           <DialogDescription>Add a new customer order</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          {/* ---- Customer (spec §6) ---- */}
+          <div className="space-y-2">
+            <Label>Customer *</Label>
+            <CustomerCombobox
+              value={selectedCustomer}
+              onSelect={handleSelectCustomer}
+              onCreateNew={() => setQuickCreateOpen(true)}
+              onClear={resetCustomer}
+            />
+            <p className="text-xs text-muted-foreground">
+              Search a saved customer, or leave this empty and type the details below for a walk-in
+              order.
+            </p>
+          </div>
+
+          {selectedCustomer && (
+            <div className="rounded-lg border bg-muted/40 p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Code</p>
+                <p className="font-medium">{formData.customer_code || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Contact</p>
+                <p className="font-medium">{formData.customer_contact || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">GSTIN</p>
+                <p className="font-medium font-mono text-xs">{formData.customer_gstin || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Payment Terms</p>
+                <p className="font-medium">{formatPaymentTerms(formData.payment_terms)}</p>
+              </div>
+              <div className="col-span-2 md:col-span-4">
+                <p className="text-xs text-muted-foreground">Billing Address</p>
+                <p className="font-medium">{formData.customer_address || '-'}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Non-blocking credit warning — spec §4 warns at launch, blocks later. */}
+          {creditCheck?.wouldExceed && (
+            <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+              <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Credit limit would be exceeded</p>
+                <p className="text-muted-foreground">
+                  {formData.customer_name || 'This customer'} has{' '}
+                  {formatCurrency(creditCheck.outstanding)} unpaid against a credit limit of{' '}
+                  {formatCurrency(creditCheck.creditLimit)}. This order of{' '}
+                  {formatCurrency(orderTotal)} pushes them over. You can still proceed.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="customer_name">Customer Name *</Label>
@@ -318,26 +510,7 @@ function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
                 value={formData.customer_name}
                 onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
                 placeholder="Enter customer name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="customer_code">Customer Code</Label>
-              <Input
-                id="customer_code"
-                value={formData.customer_code}
-                onChange={(e) => setFormData({ ...formData, customer_code: e.target.value })}
-                placeholder="Customer code"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="customer_contact">Contact</Label>
-              <Input
-                id="customer_contact"
-                value={formData.customer_contact}
-                onChange={(e) => setFormData({ ...formData, customer_contact: e.target.value })}
-                placeholder="Phone number"
+                disabled={!!selectedCustomer}
               />
             </div>
             <div className="space-y-2">
@@ -354,16 +527,77 @@ function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
               </Select>
             </div>
           </div>
+
+          {!selectedCustomer && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="customer_code">Customer Code</Label>
+                <Input
+                  id="customer_code"
+                  value={formData.customer_code}
+                  onChange={(e) => setFormData({ ...formData, customer_code: e.target.value })}
+                  placeholder="Customer code"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="customer_contact">Contact</Label>
+                <Input
+                  id="customer_contact"
+                  value={formData.customer_contact}
+                  onChange={(e) => setFormData({ ...formData, customer_contact: e.target.value })}
+                  placeholder="Phone number"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ---- Shipping address ---- */}
           <div className="space-y-2">
-            <Label htmlFor="customer_address">Delivery Address</Label>
-            <Textarea
-              id="customer_address"
-              value={formData.customer_address}
-              onChange={(e) => setFormData({ ...formData, customer_address: e.target.value })}
-              placeholder="Full delivery address"
-              rows={2}
-            />
+            <Label>Shipping Address</Label>
+            {selectedCustomer && savedAddresses.length > 0 && (
+              <Select value={shippingAddressId} onValueChange={setShippingAddressId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a saved address" />
+                </SelectTrigger>
+                <SelectContent>
+                  {savedAddresses.map((address) => (
+                    <SelectItem key={address.id} value={address.id}>
+                      {address.label}
+                      {address.isDefault ? ' (default)' : ''} — {formatAddress(address)}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={MANUAL_ADDRESS}>Enter a different address…</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+
+            {shippingAddressId !== MANUAL_ADDRESS && chosenAddress ? (
+              <p className="text-sm text-muted-foreground rounded-md border p-3">
+                {formatAddress(chosenAddress) || 'No address details on file.'}
+              </p>
+            ) : (
+              <Textarea
+                id="shipping_address"
+                value={formData.shipping_address}
+                onChange={(e) => setFormData({ ...formData, shipping_address: e.target.value })}
+                placeholder="Full delivery address"
+                rows={2}
+              />
+            )}
           </div>
+
+          {!selectedCustomer && (
+            <div className="space-y-2">
+              <Label htmlFor="customer_address">Billing Address</Label>
+              <Textarea
+                id="customer_address"
+                value={formData.customer_address}
+                onChange={(e) => setFormData({ ...formData, customer_address: e.target.value })}
+                placeholder="Billing address (defaults to the delivery address)"
+                rows={2}
+              />
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="expected_delivery_date">Expected Delivery</Label>
@@ -468,12 +702,40 @@ function CreateOrderDialog({ open, onOpenChange, onSubmit }: any) {
             </div>
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSubmit}>Create Order</Button>
+        <DialogFooter className="sm:justify-between items-center">
+          <span className="text-sm text-muted-foreground">
+            Order total: <span className="font-semibold text-foreground">{formatCurrency(orderTotal)}</span>
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button onClick={handleSubmit}>Create Order</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/*
+      Quick create lives outside the order dialog so creating a customer never
+      unmounts the order form — everything already entered survives, and the
+      new customer is auto-selected on success (spec §6).
+    */}
+    <CustomerFormDialog
+      open={quickCreateOpen}
+      onOpenChange={setQuickCreateOpen}
+      mode="quick"
+      onSuccess={(customer) => {
+        if (!customer?.id) return;
+        handleSelectCustomer({
+          id: customer.id,
+          code: customer.code,
+          name: customer.name,
+          phone: customer.phone,
+          gstNumber: customer.gstNumber,
+          paymentTerms: customer.paymentTerms,
+        });
+      }}
+    />
+    </>
   );
 }
 

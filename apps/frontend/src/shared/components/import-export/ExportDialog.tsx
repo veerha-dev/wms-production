@@ -17,6 +17,7 @@ import { ExportProgressTracker } from './ProgressTracker';
 import { ImportExportConfig, ExportProgress, FileFormat } from '@/shared/lib/import-export/types';
 import { exportToCSV } from '@/shared/lib/import-export/csv-generator';
 import { exportToExcel } from '@/shared/lib/import-export/excel-generator';
+import { api } from '@/shared/lib/api';
 
 interface ExportDialogProps<T extends Record<string, unknown>> {
   open: boolean;
@@ -24,6 +25,15 @@ interface ExportDialogProps<T extends Record<string, unknown>> {
   config: ImportExportConfig<T>;
   data: T[];
   filters?: Record<string, unknown>;
+  /**
+   * Opt in to server-side export: fetch EVERY record matching `filters` from
+   * `config.api.export` at export time instead of writing out the page of rows
+   * held in `data`. Off by default so screens whose export endpoint does not
+   * exist yet keep the client-side behaviour.
+   */
+  serverSide?: boolean;
+  /** Total matching records, used for the button/description copy. */
+  totalCount?: number;
 }
 
 export function ExportDialog<T extends Record<string, unknown>>({
@@ -32,6 +42,8 @@ export function ExportDialog<T extends Record<string, unknown>>({
   config,
   data,
   filters,
+  serverSide = false,
+  totalCount,
 }: ExportDialogProps<T>) {
   const [format, setFormat] = useState<FileFormat>('csv');
   const [selectedColumns, setSelectedColumns] = useState<string[]>(config.export.defaultColumns);
@@ -58,26 +70,45 @@ export function ExportDialog<T extends Record<string, unknown>>({
   const handleExport = useCallback(async () => {
     if (selectedColumns.length === 0) return;
 
-    setProgress({ stage: 'generating', progress: 50, message: 'Generating file...' });
+    const useServer = serverSide && !!config.api.export;
+    setProgress({
+      stage: 'generating',
+      progress: useServer ? 25 : 50,
+      message: useServer ? 'Fetching all records...' : 'Generating file...',
+    });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Pull the full result set — the loaded page is only the current 25 rows.
+      let rows: T[] = data;
+      if (useServer) {
+        const { data: body } = await api.get(config.api.export as string, { params: filters });
+        const fetched = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : null;
+        if (!fetched) throw new Error('Export endpoint returned an unexpected response');
+        rows = fetched as T[];
+        setProgress({ stage: 'generating', progress: 65, message: 'Generating file...' });
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
 
       if (format === 'csv') {
-        exportToCSV(data, {
+        exportToCSV(rows, {
           config: config.export,
           selectedColumns,
           filters,
         });
       } else {
-        exportToExcel(data, {
+        exportToExcel(rows, {
           config: config.export,
           selectedColumns,
           filters,
         });
       }
 
-      setProgress({ stage: 'complete', progress: 100, message: 'Export complete!' });
+      setProgress({
+        stage: 'complete',
+        progress: 100,
+        message: `Export complete — ${rows.length} records`,
+      });
 
       setTimeout(() => {
         onOpenChange(false);
@@ -90,7 +121,10 @@ export function ExportDialog<T extends Record<string, unknown>>({
         message: error instanceof Error ? error.message : 'Export failed',
       });
     }
-  }, [format, selectedColumns, data, config.export, filters, onOpenChange]);
+  }, [format, selectedColumns, data, config.export, config.api.export, serverSide, filters, onOpenChange]);
+
+  // Server-side export writes every matching record, not just the loaded page.
+  const recordCount = serverSide && config.api.export ? totalCount ?? data.length : data.length;
 
   const handleClose = useCallback(() => {
     setProgress({ stage: 'idle', progress: 0, message: '' });
@@ -105,7 +139,7 @@ export function ExportDialog<T extends Record<string, unknown>>({
         <DialogHeader>
           <DialogTitle>Export {config.entityLabel}</DialogTitle>
           <DialogDescription>
-            Export {data.length} {config.entityLabel.toLowerCase()} records to a file.
+            Export {recordCount} {config.entityLabel.toLowerCase()} records to a file.
           </DialogDescription>
         </DialogHeader>
 
@@ -209,7 +243,7 @@ export function ExportDialog<T extends Record<string, unknown>>({
             onClick={handleExport}
             disabled={selectedColumns.length === 0 || isExporting}
           >
-            Export {data.length} Records
+            Export {recordCount} Records
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -5,30 +5,31 @@ import { useTheme } from '@/shared/contexts/ThemeContext';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/shared/lib/api';
 import {
-  usePreferences, useUpdateGeneral, useUpdateNotifications, useUpdateSecurityPrefs,
-  useTenantSettings, useUpdateTenantInfo, useIntegrations, useUpdateIntegration,
-  useSendTestNotification, useUpdateProfile, useChangePassword,
+  usePreferences, useUpdateGeneral, useUpdateSecurityPrefs,
+  useTenantSettings, useIntegrations,
+  useUpdateProfile, useChangePassword,
   useSecurityPolicy, useUpdateSecurityPolicy,
-  UserPreferences, TenantSettings, Integration, SecurityPolicy,
+  UserPreferences, SecurityPolicy,
 } from '@/features/settings/hooks/useSettings';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { Label } from '@/shared/components/ui/label';
 import { Switch } from '@/shared/components/ui/switch';
-import { Textarea } from '@/shared/components/ui/textarea';
-import { Badge } from '@/shared/components/ui/badge';
-import { Progress } from '@/shared/components/ui/progress';
-import { Skeleton } from '@/shared/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/components/ui/dialog';
 import { Separator } from '@/shared/components/ui/separator';
 import { cn } from '@/shared/lib/utils';
 import {
-  Settings, Building2, Bell, Shield, Database, Palette,
+  Settings, Building2, Bell, Shield, Database, Palette, Warehouse, Boxes,
   Save, LogOut, Eye, EyeOff, CheckCircle2, AlertTriangle, Loader2,
-  Sun, Moon, Monitor, Plug, Unplug, Send, RefreshCw,
+  Sun, Moon, Monitor, RefreshCw,
 } from 'lucide-react';
+import { Field, SaveBar, SectionHeader, SettingsSkeleton, ToggleRow } from '../components/settings-primitives';
+import { OperationsTab } from '../components/OperationsTab';
+import { MastersTab } from '../components/MastersTab';
+import { OrganizationTab } from '../components/OrganizationTab';
+import { NotificationsTab } from '../components/NotificationsTab';
+import { IntegrationsTab } from '../components/IntegrationsTab';
 
 const TIMEZONES = [
   { value: 'Asia/Kolkata', label: 'India (IST +5:30)' },
@@ -57,7 +58,7 @@ const LANGUAGES = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { user, isAdmin, signOut } = useAuth();
+  const { user, isAdmin, isManager, signOut } = useAuth();
   const { theme, setTheme, primaryColor, setPrimaryColor } = useTheme();
   const { data: prefs, isLoading: prefsLoading } = usePreferences();
   const { data: tenantData, isLoading: tenantLoading } = useTenantSettings();
@@ -72,21 +73,29 @@ export default function SettingsPage() {
   });
   const unreadCount: number = alertSummary?.unacknowledgedAlerts || 0;
 
+  const showOperations = isAdmin || isManager;
+
   return (
     <AppLayout
       title="Settings"
       breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Settings' }]}
     >
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-4 sm:grid-cols-8 h-auto lg:w-auto lg:inline-grid">
           <TabsTrigger value="general" className="gap-2">
-            <Settings className="h-4 w-4" /><span className="hidden sm:inline">General</span>
+            <Settings className="h-4 w-4" /><span className="hidden lg:inline">General</span>
           </TabsTrigger>
           <TabsTrigger value="tenant" className="gap-2">
-            <Building2 className="h-4 w-4" /><span className="hidden sm:inline">Organization</span>
+            <Building2 className="h-4 w-4" /><span className="hidden lg:inline">Organization</span>
+          </TabsTrigger>
+          <TabsTrigger value="operations" className="gap-2">
+            <Warehouse className="h-4 w-4" /><span className="hidden lg:inline">Operations</span>
+          </TabsTrigger>
+          <TabsTrigger value="masters" className="gap-2">
+            <Boxes className="h-4 w-4" /><span className="hidden lg:inline">Masters</span>
           </TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2 relative">
-            <Bell className="h-4 w-4" /><span className="hidden sm:inline">Notifications</span>
+            <Bell className="h-4 w-4" /><span className="hidden lg:inline">Notifications</span>
             {unreadCount > 0 && (
               <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-[10px] text-white flex items-center justify-center">
                 {unreadCount > 9 ? '9+' : unreadCount}
@@ -94,13 +103,13 @@ export default function SettingsPage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-2">
-            <Shield className="h-4 w-4" /><span className="hidden sm:inline">Security</span>
+            <Shield className="h-4 w-4" /><span className="hidden lg:inline">Security</span>
           </TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2">
-            <Database className="h-4 w-4" /><span className="hidden sm:inline">Integrations</span>
+            <Database className="h-4 w-4" /><span className="hidden lg:inline">Integrations</span>
           </TabsTrigger>
           <TabsTrigger value="appearance" className="gap-2">
-            <Palette className="h-4 w-4" /><span className="hidden sm:inline">Appearance</span>
+            <Palette className="h-4 w-4" /><span className="hidden lg:inline">Appearance</span>
           </TabsTrigger>
         </TabsList>
 
@@ -108,7 +117,17 @@ export default function SettingsPage() {
           <GeneralTab prefs={prefs} isLoading={prefsLoading} />
         </TabsContent>
         <TabsContent value="tenant">
-          <TenantTab tenantData={tenantData} isLoading={tenantLoading} isAdmin={isAdmin} />
+          <OrganizationTab tenantData={tenantData} isLoading={tenantLoading} isAdmin={isAdmin} />
+        </TabsContent>
+        <TabsContent value="operations">
+          {showOperations ? (
+            <OperationsTab />
+          ) : (
+            <RestrictedNotice message="Only administrators and warehouse managers can view operational setup." />
+          )}
+        </TabsContent>
+        <TabsContent value="masters">
+          <MastersTab isAdmin={isAdmin} />
         </TabsContent>
         <TabsContent value="notifications">
           <NotificationsTab prefs={prefs} isLoading={prefsLoading} unreadCount={unreadCount} />
@@ -124,6 +143,15 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </AppLayout>
+  );
+}
+
+function RestrictedNotice({ message }: { message: string }) {
+  return (
+    <div className="wms-card p-8 flex flex-col items-center text-center gap-2">
+      <Shield className="h-6 w-6 text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">{message}</p>
+    </div>
   );
 }
 
@@ -214,176 +242,7 @@ function GeneralTab({ prefs, isLoading }: { prefs?: UserPreferences; isLoading: 
   );
 }
 
-// ─── Tab 2: Organization ──────────────────────────────────────────────────────
-
-function TenantTab({ tenantData, isLoading, isAdmin }: { tenantData?: TenantSettings; isLoading: boolean; isAdmin: boolean }) {
-  const update = useUpdateTenantInfo();
-  const [form, setForm] = useState<Partial<TenantSettings & { gstNumber: string; industry: string }>>({});
-
-  useEffect(() => {
-    if (tenantData) setForm({
-      companyName: tenantData.companyName,
-      industry: tenantData.industry || '',
-      address: tenantData.address || '',
-      city: tenantData.city || '',
-      country: tenantData.country || '',
-      gstNumber: tenantData.gstNumber || '',
-    });
-  }, [tenantData]);
-
-  const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
-
-  if (isLoading) return <SettingsSkeleton />;
-
-  const usagePct = (used: number, max: number) => max > 0 ? Math.round((used / max) * 100) : 0;
-  const usageColor = (pct: number) => pct > 90 ? 'bg-destructive' : pct > 70 ? 'bg-warning' : 'bg-success';
-
-  return (
-    <div className="space-y-6">
-      <SectionHeader title="Organization" description="Your organization profile and subscription plan details" />
-
-      {/* Plan Info */}
-      <div className="wms-card p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold">Current Plan</h3>
-          <Badge className="bg-primary/10 text-primary border-primary/20 capitalize">
-            {tenantData?.planName || 'Starter'}
-          </Badge>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[
-            { label: 'Users', used: tenantData?.userCount || 0, max: tenantData?.maxUsers || 10 },
-            { label: 'Warehouses', used: tenantData?.warehouseCount || 0, max: tenantData?.maxWarehouses || 3 },
-            { label: 'SKUs', used: tenantData?.skuCount || 0, max: tenantData?.maxSkus || 100 },
-          ].map(({ label, used, max }) => {
-            const pct = usagePct(used, max);
-            return (
-              <div key={label}>
-                <div className="flex justify-between text-sm mb-1.5">
-                  <span className="text-muted-foreground">{label}</span>
-                  <span className="font-medium">{used} / {max}</span>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div className={cn('h-full rounded-full transition-all', usageColor(pct))} style={{ width: `${Math.min(pct, 100)}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Edit Form */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Field label="Organization Name">
-          <Input value={form.companyName || ''} onChange={(e) => set('companyName', e.target.value)} disabled={!isAdmin} />
-        </Field>
-        <Field label="Industry">
-          <Select value={form.industry || ''} onValueChange={(v) => set('industry', v)} disabled={!isAdmin}>
-            <SelectTrigger><SelectValue placeholder="Select industry" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="logistics">Logistics & Distribution</SelectItem>
-              <SelectItem value="manufacturing">Manufacturing</SelectItem>
-              <SelectItem value="retail">Retail & E-commerce</SelectItem>
-              <SelectItem value="healthcare">Healthcare & Pharma</SelectItem>
-              <SelectItem value="fmcg">FMCG</SelectItem>
-              <SelectItem value="automotive">Automotive</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label="City">
-          <Input value={form.city || ''} onChange={(e) => set('city', e.target.value)} disabled={!isAdmin} />
-        </Field>
-        <Field label="Country">
-          <Input value={form.country || ''} onChange={(e) => set('country', e.target.value)} disabled={!isAdmin} />
-        </Field>
-        <Field label="GST / Tax Number">
-          <Input value={form.gstNumber || ''} onChange={(e) => set('gstNumber', e.target.value)} disabled={!isAdmin} />
-        </Field>
-        <Field label="Business Address">
-          <Textarea value={form.address || ''} onChange={(e) => set('address', e.target.value)} rows={2} disabled={!isAdmin} />
-        </Field>
-      </div>
-      {!isAdmin && (
-        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <Shield className="h-3.5 w-3.5" /> Only administrators can edit organization settings.
-        </p>
-      )}
-      {isAdmin && <SaveBar onSave={() => update.mutate(form)} isPending={update.isPending} />}
-    </div>
-  );
-}
-
-// ─── Tab 3: Notifications ─────────────────────────────────────────────────────
-
-function NotificationsTab({ prefs, isLoading, unreadCount }: { prefs?: UserPreferences; isLoading: boolean; unreadCount: number }) {
-  const update = useUpdateNotifications();
-  const testNotif = useSendTestNotification();
-  const [form, setForm] = useState<Partial<UserPreferences>>({});
-
-  useEffect(() => {
-    if (prefs) setForm({
-      notifEmailLowStock: prefs.notifEmailLowStock,
-      notifEmailTaskException: prefs.notifEmailTaskException,
-      notifEmailDailySummary: prefs.notifEmailDailySummary,
-      notifEmailUserActivity: prefs.notifEmailUserActivity,
-      notifEmailSystemUpdates: prefs.notifEmailSystemUpdates,
-      notifInappRealtime: prefs.notifInappRealtime,
-      notifInappSound: prefs.notifInappSound,
-    });
-  }, [prefs]);
-
-  const set = (k: keyof UserPreferences, v: any) => setForm((f) => ({ ...f, [k]: v }));
-
-  if (isLoading) return <SettingsSkeleton />;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <SectionHeader title="Notifications" description="Control how and when you receive alerts and updates" />
-        {unreadCount > 0 && (
-          <Badge variant="destructive" className="gap-1.5">
-            <Bell className="h-3 w-3" />{unreadCount} unread
-          </Badge>
-        )}
-      </div>
-
-      <div className="wms-card p-5 space-y-4">
-        <h3 className="text-sm font-semibold flex items-center gap-2"><Bell className="h-4 w-4 text-muted-foreground" /> Email Notifications</h3>
-        <Separator />
-        {[
-          { key: 'notifEmailLowStock' as const, label: 'Low Stock Alerts', desc: 'When SKUs fall below reorder point' },
-          { key: 'notifEmailTaskException' as const, label: 'Task Exceptions', desc: 'When tasks fail or need attention' },
-          { key: 'notifEmailDailySummary' as const, label: 'Daily Summary', desc: 'End-of-day warehouse activity digest' },
-          { key: 'notifEmailUserActivity' as const, label: 'User Activity', desc: 'Login events and user actions' },
-          { key: 'notifEmailSystemUpdates' as const, label: 'System Updates', desc: 'Platform and feature announcements' },
-        ].map(({ key, label, desc }) => (
-          <ToggleRow key={key} label={label} description={desc}
-            checked={!!form[key]} onCheckedChange={(v) => set(key, v)} />
-        ))}
-      </div>
-
-      <div className="wms-card p-5 space-y-4">
-        <h3 className="text-sm font-semibold flex items-center gap-2"><Monitor className="h-4 w-4 text-muted-foreground" /> In-App Notifications</h3>
-        <Separator />
-        <ToggleRow label="Real-time Alerts" description="Show live alerts as they happen in the dashboard"
-          checked={!!form.notifInappRealtime} onCheckedChange={(v) => set('notifInappRealtime', v)} />
-        <ToggleRow label="Sound Alerts" description="Play notification sound for critical alerts"
-          checked={!!form.notifInappSound} onCheckedChange={(v) => set('notifInappSound', v)} />
-      </div>
-
-      <div className="flex items-center gap-3">
-        <SaveBar onSave={() => update.mutate(form)} isPending={update.isPending} />
-        <Button variant="outline" size="sm" onClick={() => testNotif.mutate()} disabled={testNotif.isPending} className="gap-2">
-          {testNotif.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-          Send Test Notification
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Tab 4: Security ──────────────────────────────────────────────────────────
+// ─── Tab 6: Security ──────────────────────────────────────────────────────────
 
 function SecurityTab({ prefs, user, signOut }: { prefs?: UserPreferences; user: any; signOut: () => Promise<void> }) {
   const updateProfile = useUpdateProfile();
@@ -584,93 +443,7 @@ function PolicyToggle({ label, checked, onChange }: { label: string; checked: bo
   );
 }
 
-// ─── Tab 5: Integrations ──────────────────────────────────────────────────────
-
-function IntegrationsTab({ integrations, isLoading, isAdmin }: { integrations: Integration[]; isLoading: boolean; isAdmin: boolean }) {
-  const updateIntegration = useUpdateIntegration();
-  const [modal, setModal] = useState<{ open: boolean; item: Integration | null }>({ open: false, item: null });
-  const [modalForm, setModalForm] = useState({ connected: false, connectionDetails: '' });
-
-  const openModal = (item: Integration) => {
-    setModal({ open: true, item });
-    setModalForm({ connected: item.connected, connectionDetails: item.connectionDetails || '' });
-  };
-
-  const saveIntegration = () => {
-    if (!modal.item) return;
-    updateIntegration.mutate(
-      { key: modal.item.key, connected: modalForm.connected, connectionDetails: modalForm.connectionDetails },
-      { onSuccess: () => setModal({ open: false, item: null }) },
-    );
-  };
-
-  if (isLoading) return <SettingsSkeleton />;
-
-  return (
-    <div className="space-y-6">
-      <SectionHeader title="Integrations" description="Manage third-party connections and API integrations" />
-      <div className="grid grid-cols-1 gap-4">
-        {integrations.map((item) => (
-          <div key={item.key} className="wms-card p-5 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4 flex-1">
-              <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0',
-                item.connected ? 'bg-success/10' : 'bg-muted')}>
-                {item.connected
-                  ? <Plug className="h-5 w-5 text-success" />
-                  : <Unplug className="h-5 w-5 text-muted-foreground" />}
-              </div>
-              <div>
-                <p className="font-medium text-sm">{item.name}</p>
-                <p className="text-xs text-muted-foreground">{item.description}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 flex-shrink-0">
-              <Badge variant="outline" className={cn('text-xs', item.connected
-                ? 'bg-success/10 text-success border-success/20'
-                : 'bg-muted text-muted-foreground')}>
-                {item.connected ? 'Connected' : 'Not Configured'}
-              </Badge>
-              <Button variant="outline" size="sm" onClick={() => openModal(item)} disabled={!isAdmin}>
-                {item.connected ? 'Manage' : 'Configure'}
-              </Button>
-            </div>
-          </div>
-        ))}
-      </div>
-      {!isAdmin && <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Shield className="h-3.5 w-3.5" />Only administrators can manage integrations.</p>}
-
-      <Dialog open={modal.open} onOpenChange={(o) => !o && setModal({ open: false, item: null })}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{modal.item?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">{modal.item?.description}</p>
-            <ToggleRow label="Connected" description="Enable or disable this integration"
-              checked={modalForm.connected} onCheckedChange={(v) => setModalForm((f) => ({ ...f, connected: v }))} />
-            <Field label="Connection Details (optional)">
-              <Textarea
-                value={modalForm.connectionDetails}
-                onChange={(e) => setModalForm((f) => ({ ...f, connectionDetails: e.target.value }))}
-                placeholder="API endpoint, credentials notes, etc."
-                rows={3}
-              />
-            </Field>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setModal({ open: false, item: null })}>Cancel</Button>
-            <Button onClick={saveIntegration} disabled={updateIntegration.isPending} className="gap-2">
-              {updateIntegration.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-// ─── Tab 6: Appearance ────────────────────────────────────────────────────────
+// ─── Tab 8: Appearance ────────────────────────────────────────────────────────
 
 function AppearanceTab({ theme, setTheme, primaryColor, setPrimaryColor }: {
   theme: string; setTheme: (t: any) => void;
@@ -747,59 +520,6 @@ function AppearanceTab({ theme, setTheme, primaryColor, setPrimaryColor }: {
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Shared Components ───────────────────────────────────────────────────────
-
-function SectionHeader({ title, description }: { title: string; description: string }) {
-  return (
-    <div>
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-sm">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function ToggleRow({ label, description, checked, onCheckedChange }: {
-  label: string; description: string; checked: boolean; onCheckedChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-1">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
-  );
-}
-
-function SaveBar({ onSave, isPending }: { onSave: () => void; isPending: boolean }) {
-  return (
-    <div className="flex justify-end pt-2">
-      <Button onClick={onSave} disabled={isPending} className="gap-2">
-        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-        Save Changes
-      </Button>
-    </div>
-  );
-}
-
-function SettingsSkeleton() {
-  return (
-    <div className="space-y-4">
-      {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
     </div>
   );
 }

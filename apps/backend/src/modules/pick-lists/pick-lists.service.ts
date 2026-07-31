@@ -2,12 +2,16 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PickListsRepository } from './pick-lists.repository';
 import { GeneratePickListDto } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
 @Injectable()
 export class PickListsService {
-  constructor(private repository: PickListsRepository) {}
+  constructor(
+    private repository: PickListsRepository,
+    private numbering: DocumentNumberingService,
+  ) {}
 
 
   async findAll(query: any, user?: AuthUser) {
@@ -217,9 +221,14 @@ export class PickListsService {
     };
   }
 
+  /**
+   * Issued by the tenant's configurable sequence (Settings > Document
+   * Numbering) instead of row count, which ignored the configured
+   * prefix/length and collided after a delete. Migration 078 backfills
+   * the counter past existing documents, so this is safe on upgrades.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `PL-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'pick_list');
   }
 }
 

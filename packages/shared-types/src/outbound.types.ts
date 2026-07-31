@@ -66,17 +66,76 @@ export interface SalesOrderItem {
   shippedQty: number;
 }
 
+export type CustomerType = 'b2b' | 'b2c';
+export type CustomerPaymentTerms = 'immediate' | 'net_15' | 'net_30' | 'net_45' | 'net_60';
+export type CustomerAddressType = 'billing' | 'shipping';
+
 export interface Customer extends TenantScopedEntity {
   code: string;
   name: string;
+  /** B2B carries a GSTIN and is e-invoice eligible; B2C never has one. */
+  customerType?: CustomerType;
+  contactPerson?: string;
   email?: string;
   phone?: string;
+  whatsappNumber?: string;
   address?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  /** Derived from the GSTIN's first two digits — drives CGST+SGST vs IGST. */
+  state?: string;
+  pincode?: string;
+  postalCode?: string;
+  country?: string;
+  gstNumber?: string;
+  panNumber?: string;
+  paymentTerms?: CustomerPaymentTerms;
+  creditLimit?: number | null;
+  notes?: string;
+  status: 'active' | 'inactive';
+  isActive?: boolean;
+  // Aggregates, present on list/detail responses only.
+  totalOrders?: number;
+  totalBusinessValue?: number;
+  lastOrderDate?: string;
+}
+
+export interface CustomerAddress extends TenantScopedEntity {
+  customerId: string;
+  /** Human label, e.g. "Chennai Main Shop". */
+  label?: string;
+  addressType: CustomerAddressType;
+  street?: string;
   city?: string;
   state?: string;
   pincode?: string;
-  gstNumber?: string;
+  isDefault: boolean;
   status: 'active' | 'inactive';
+  /** street, city, state, pincode joined for display. */
+  formatted?: string;
+}
+
+export interface CustomerStats {
+  total: number;
+  active: number;
+  inactive: number;
+  b2b: number;
+  b2c: number;
+  newThisMonth: number;
+  pendingPayments: number;
+}
+
+export interface CustomerCreditCheck {
+  customerId: string;
+  customerName: string;
+  creditLimit: number | null;
+  outstanding: number;
+  orderValue: number;
+  projectedOutstanding: number;
+  available: number | null;
+  wouldExceed: boolean;
+  message: string;
 }
 
 export interface PickList extends TenantScopedEntity {

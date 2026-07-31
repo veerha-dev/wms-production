@@ -17,6 +17,15 @@ export class SalesOrdersRepository {
       warehouseId: row.warehouse_id,
       status: row.status,
       shippingAddress: row.shipping_address,
+      shippingAddressId: row.shipping_address_id ?? null,
+      // Snapshot of the customer as they were when the order was placed —
+      // editing the customer later must not rewrite historical documents.
+      customerGstin: row.customer_gstin ?? null,
+      customerPhone: row.customer_phone ?? null,
+      customerEmail: row.customer_email ?? null,
+      customerState: row.customer_state ?? null,
+      billingAddress: row.billing_address ?? null,
+      paymentTerms: row.payment_terms ?? null,
       totalAmount: row.total_amount ? parseFloat(row.total_amount) : 0,
       total_value: row.total_amount ? parseFloat(row.total_amount) : 0,
       notes: row.notes,
@@ -28,6 +37,7 @@ export class SalesOrdersRepository {
       // Joined fields
       customerName: row.customer_name,
       customer_name: row.customer_name,
+      customerCode: row.customer_code ?? null,
       customer: row.customer_name ? { name: row.customer_name, code: row.customer_code } : null,
       warehouseName: row.warehouse_name,
       itemCount: row.item_count ? parseInt(row.item_count) : 0,
@@ -45,7 +55,7 @@ export class SalesOrdersRepository {
     let idx = 2;
     if (search || customer) {
       const q = search || customer;
-      conditions.push(`(c.name ILIKE $${idx} OR so.so_number ILIKE $${idx})`);
+      conditions.push(`(COALESCE(so.customer_name, c.name) ILIKE $${idx} OR so.so_number ILIKE $${idx})`);
       params.push(`%${q}%`); idx++;
     }
     if (status) { conditions.push(`so.status = $${idx}`); params.push(status); idx++; }
@@ -55,7 +65,10 @@ export class SalesOrdersRepository {
     const total = parseInt(countRes.rows[0].count, 10);
 
     const dataRes = await this.db.query(`
-      SELECT so.*, c.name as customer_name, c.code as customer_code, w.name as warehouse_name,
+      SELECT so.*,
+             COALESCE(so.customer_name, c.name) as customer_name,
+             COALESCE(so.customer_code, c.code) as customer_code,
+             w.name as warehouse_name,
              (SELECT count(*) FROM sales_order_items WHERE so_id = so.id) as item_count,
              (SELECT COALESCE(sum(quantity_ordered * unit_price), 0) FROM sales_order_items WHERE so_id = so.id) as calculated_total
       FROM sales_orders so
@@ -71,7 +84,10 @@ export class SalesOrdersRepository {
 
   async findById(id: string, tenantId: string): Promise<any> {
     const soRes = await this.db.query(`
-      SELECT so.*, c.name as customer_name, c.code as customer_code, w.name as warehouse_name
+      SELECT so.*,
+             COALESCE(so.customer_name, c.name) as customer_name,
+             COALESCE(so.customer_code, c.code) as customer_code,
+             w.name as warehouse_name
       FROM sales_orders so
       LEFT JOIN customers c ON so.customer_id = c.id
       LEFT JOIN warehouses w ON so.warehouse_id = w.id
@@ -102,12 +118,32 @@ export class SalesOrdersRepository {
       const customerId = dto.customerId || dto.customer_id || null;
       const warehouseId = dto.warehouseId || dto.warehouse_id || null;
       const shippingAddress = dto.shippingAddress || dto.shipping_address || dto.customer_address || null;
+      const shippingAddressId = dto.shippingAddressId || dto.shipping_address_id || null;
       const notes = dto.notes || null;
 
+      // Denormalized customer snapshot (see 084_create_customer_addresses.sql).
+      // Populated by the service from the customers record at order time; NULL
+      // for the free-text/walk-in path, where reads fall back to the join.
       const soRes = await client.query(
-        `INSERT INTO sales_orders (tenant_id, so_number, customer_id, warehouse_id, status, shipping_address, total_amount, notes)
-         VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7) RETURNING *`,
-        [tenantId, soNumber, customerId, warehouseId, shippingAddress, 0, notes],
+        `INSERT INTO sales_orders (
+           tenant_id, so_number, customer_id, warehouse_id, status, shipping_address,
+           shipping_address_id, total_amount, notes,
+           customer_name, customer_code, customer_gstin, customer_phone, customer_email,
+           customer_state, billing_address, payment_terms
+         ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         RETURNING *`,
+        [
+          tenantId, soNumber, customerId, warehouseId, shippingAddress,
+          shippingAddressId, 0, notes,
+          dto.customerNameSnapshot ?? null,
+          dto.customerCodeSnapshot ?? null,
+          dto.customerGstin ?? null,
+          dto.customerPhone ?? null,
+          dto.customerEmail ?? null,
+          dto.customerState ?? null,
+          dto.billingAddress ?? null,
+          dto.paymentTerms ?? null,
+        ],
       );
       const so = soRes.rows[0];
 
@@ -140,6 +176,7 @@ export class SalesOrdersRepository {
       customerId: 'customer_id', customer_id: 'customer_id',
       warehouseId: 'warehouse_id', warehouse_id: 'warehouse_id',
       shippingAddress: 'shipping_address', shipping_address: 'shipping_address',
+      shippingAddressId: 'shipping_address_id', shipping_address_id: 'shipping_address_id',
       totalAmount: 'total_amount', total_amount: 'total_amount',
       notes: 'notes',
     };
