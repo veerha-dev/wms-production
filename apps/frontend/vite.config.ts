@@ -20,6 +20,123 @@ import { VitePWA } from "vite-plugin-pwa";
 // Brand colours, mirroring --sidebar-background / --sidebar-primary in src/app/index.css
 const BRAND_NAVY = "#0f1729"; // hsl(222 47% 11%)
 
+/**
+ * Vendor chunks. Same four groups as before, but matched against the *package
+ * root* rather than by handing rollup a bare package name.
+ *
+ * That distinction is load-bearing. The object form
+ * (`manualChunks: { charts: ["recharts"] }`) sweeps recharts' whole dependency
+ * closure into the `charts` chunk — including micro-libraries like clsx that
+ * the app shell also uses. One `import { clsx }` from the entry then makes the
+ * 410 kB charts chunk a *static* import of the entry, so every worker
+ * downloaded and parsed all of recharts at boot no matter which route they
+ * opened. Scoping each group to its own package files leaves those shared
+ * micro-deps where rollup can place them sensibly, and keeps recharts reachable
+ * only through the lazy report routes that actually render a chart.
+ */
+const VENDOR_CHUNKS: Array<readonly [string, readonly string[]]> = [
+  [
+    "vendor",
+    [
+      "react",
+      "react-dom",
+      "react-router-dom",
+      // clsx / cva / tailwind-merge back the `cn()` helper in
+      // src/shared/lib/utils.ts, which practically every component calls. They
+      // are shared by eager and lazy code alike, and left unpinned rollup
+      // parked them inside the `charts` chunk — which is precisely what made
+      // the entry statically import all 410 kB of recharts. Pinning them to
+      // the shell chunk they belong in keeps that edge from re-forming.
+      "clsx",
+      "class-variance-authority",
+      "tailwind-merge",
+    ],
+  ],
+  [
+    "ui",
+    [
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-select",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-tooltip",
+    ],
+  ],
+  ["charts", ["recharts"]],
+  ["query", ["@tanstack/react-query"]],
+];
+
+function manualChunks(id: string): string | undefined {
+  const segments = id.split("node_modules/");
+  if (segments.length < 2) return undefined;
+  const pkgPath = segments[segments.length - 1];
+  for (const [chunk, packages] of VENDOR_CHUNKS) {
+    if (packages.some((p) => pkgPath === p || pkgPath.startsWith(`${p}/`))) {
+      return chunk;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Libraries that must never end up in the boot payload. Each is only used by a
+ * lazy desktop route (charts on reports/analytics, PDF on invoices and POs,
+ * xlsx in the import/export dialogs), and together they are the bulk of what
+ * made the old precache 3.5 MiB.
+ */
+const LAZY_ONLY_PACKAGES = ["recharts", "jspdf", "xlsx", "html2canvas"];
+
+/**
+ * Files the browser loads before the app can paint: the HTML entry chunk plus
+ * everything it reaches through *static* imports. Populated during
+ * generateBundle by the plugin below and read afterwards by the workbox
+ * manifestTransform, so the precache is derived from the real module graph
+ * instead of a filename convention that quietly rots.
+ */
+const bootFiles = new Set<string>();
+
+function bootGraphPlugin() {
+  return {
+    name: "veerha-boot-graph",
+    generateBundle(_options: unknown, bundle: Record<string, any>) {
+      bootFiles.clear();
+
+      const visit = (fileName: string) => {
+        if (bootFiles.has(fileName)) return;
+        const chunk = bundle[fileName];
+        if (!chunk || chunk.type !== "chunk") return;
+        bootFiles.add(fileName);
+        // `imports` is static only — `dynamicImports` is exactly what we want
+        // to leave out, because those are the React.lazy() route chunks.
+        for (const imported of chunk.imports as string[]) visit(imported);
+      };
+
+      for (const [fileName, chunk] of Object.entries(bundle)) {
+        if (chunk.type === "chunk" && chunk.isEntry) visit(fileName);
+      }
+
+      // Guard the whole point of the split: if a refactor ever makes one of
+      // these reachable from the entry by a static import again, fail the build
+      // here rather than silently restoring a multi-megabyte install payload.
+      const leaked = [...bootFiles].flatMap((file) =>
+        ((bundle[file].moduleIds ?? []) as string[])
+          .filter((id) =>
+            LAZY_ONLY_PACKAGES.some(
+              (p) => id.includes(`node_modules/${p}/`) || id.includes(`node_modules/${p}@`)
+            )
+          )
+          .map((id) => `${file} <- ${id}`)
+      );
+
+      if (leaked.length > 0) {
+        throw new Error(
+          `[veerha-boot-graph] These lazy-only libraries are statically reachable from the ` +
+            `entry chunk and would be downloaded at boot:\n  ${leaked.join("\n  ")}`
+        );
+      }
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
@@ -32,6 +149,9 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mode === "development" && componentTagger(),
+    // Must run before VitePWA: it fills `bootFiles`, which the manifestTransform
+    // below reads to decide what belongs in the precache.
+    bootGraphPlugin(),
     VitePWA({
       // 'prompt', never 'autoUpdate': a picker mid-task must not have the app
       // swapped underneath them. The new version installs but stays waiting until
@@ -97,9 +217,43 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        // App shell. The main bundle is >2 MiB, so raise the default cap.
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff,woff2}"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        /**
+         * Precache the app shell, not the whole app.
+         *
+         * The glob above sweeps up every emitted .js, which used to mean a
+         * worker installing the PWA over warehouse wifi downloaded all of it —
+         * reports, analytics, settings, recharts, jspdf, xlsx — for desktop
+         * screens their role cannot open.
+         *
+         * So drop any JS that the entry does not reach through a *static*
+         * import. `bootFiles` is computed from the real rollup graph in
+         * generateBundle (see bootGraphPlugin), which runs before the service
+         * worker is generated, so this stays correct as routes move between
+         * eager and lazy instead of drifting from a filename convention.
+         *
+         * Non-JS entries — index.html, the CSS, icons, the webmanifest — are
+         * always kept: they are the shell itself.
+         *
+         * Everything dropped here is still cached on first use by the
+         * veerha-app-assets rule below, so a screen a user has opened once
+         * keeps working offline.
+         */
+        manifestTransforms: [
+          (entries: Array<{ url: string }>) => {
+            const manifest = entries.filter((entry) => {
+              const file = entry.url.replace(/^\//, "");
+              if (!file.endsWith(".js")) return true;
+              // workbox-window is dynamically imported by <PwaShell />, so it is
+              // not in the static graph — but it is what registers the service
+              // worker and drives the update prompt, so keep it in the shell.
+              if (/(^|\/)workbox-window/.test(file)) return true;
+              return bootFiles.has(file);
+            });
+            return { manifest };
+          },
+        ],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         // SPA deep links work offline...
@@ -147,6 +301,25 @@ export default defineConfig(({ mode }) => ({
             },
           },
 
+          // --- LAZY ROUTE CHUNKS --------------------------------------------
+          // The route chunks dropped from the precache above. Cache each one
+          // the first time a navigation pulls it in, so a screen the user has
+          // already opened still works offline. CacheFirst is safe because
+          // every filename is content-hashed: a changed chunk is a new URL, so
+          // a stale hit is impossible. Precached shell files never reach this
+          // route — the precache handler is registered first.
+          {
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith("/assets/") &&
+              (url.pathname.endsWith(".js") || url.pathname.endsWith(".css")),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "veerha-app-assets",
+              expiration: { maxEntries: 160, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+
           // --- STATIC THIRD PARTY -------------------------------------------
           {
             urlPattern: ({ url }) => url.origin === "https://fonts.googleapis.com",
@@ -180,12 +353,7 @@ export default defineConfig(({ mode }) => ({
     minify: "esbuild",
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ["react", "react-dom", "react-router-dom"],
-          ui: ["@radix-ui/react-dialog", "@radix-ui/react-select", "@radix-ui/react-tabs", "@radix-ui/react-tooltip"],
-          charts: ["recharts"],
-          query: ["@tanstack/react-query"],
-        },
+        manualChunks,
       },
     },
   },

@@ -1,8 +1,10 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/shared/components/ui/toaster";
 import { Toaster as Sonner } from "@/shared/components/ui/sonner";
 import { TooltipProvider } from "@/shared/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import { AuthProvider } from "@/shared/contexts/AuthContext";
 import { ThemeProvider } from "@/shared/contexts/ThemeContext";
 import { WMSProvider } from "@/shared/contexts/WMSContext";
@@ -13,60 +15,83 @@ import { ProtectedRoute } from "@/features/auth/components/ProtectedRoute";
 import { ErrorBoundary } from "@/shared/components/common/ErrorBoundary";
 import { PwaShell } from "@/shared/components/pwa";
 
-// Auth
+/**
+ * ─── EAGER ROUTES ───────────────────────────────────────────────────────────
+ * These stay in the main bundle on purpose, because they are the screens that
+ * must render on the first paint over bad warehouse wifi:
+ *
+ *  - the auth pages: every session starts on one of them, so lazy-loading them
+ *    would just add a round-trip in front of the login form;
+ *  - the /m worker screens: a picker on a phone opens the installed PWA
+ *    straight into /m (it is a manifest shortcut) and must not wait on a chunk.
+ *
+ * All of them are small — cards, inputs and lucide icons, no charts, no PDF or
+ * xlsx tooling — so keeping them eager costs very little.
+ */
 import LoginPage from "@/features/auth/pages/LoginPage";
 import SignupPage from "@/features/auth/pages/SignupPage";
 import ForcePasswordChangePage from "@/features/auth/pages/ForcePasswordChangePage";
-import OnboardingWizardPage from "@/features/onboarding/pages/OnboardingWizardPage";
-// Dashboard
-import Index from "./Index";
-// Warehouse
-import WarehousesPage from "@/features/warehouse/pages/WarehousesPage";
-import MappingPage from "@/features/warehouse/pages/MappingPage";
-// Inventory
-import InventoryPage from "@/features/inventory/pages/InventoryPage";
-// Operations
-import WorkflowsPage from "@/features/operations/pages/WorkflowsPage";
-import OperationsPage from "@/features/operations/pages/OperationsPage";
-import InvoicesPage from "@/features/invoices/pages/InvoicesPage";
-// Outbound
-import CustomersPage from "@/features/customers/pages/CustomersPage";
-import CustomerDetailPage from "@/features/customers/pages/CustomerDetailPage";
-import ReturnsPage from "@/features/outbound/pages/ReturnsPage";
-import SalesOrdersPage from "@/features/outbound/pages/SalesOrdersPage";
-import PickListsPage from "@/features/outbound/pages/PickListsPage";
-import PackingPage from "@/features/outbound/pages/PackingPage";
-import ShipmentsPage from "@/features/outbound/pages/ShipmentsPage";
-import WavePlanningPage from "@/features/outbound/pages/WavePlanningPage";
-import ConsolidationPage from "@/features/outbound/pages/ConsolidationPage";
-// Inbound
-import PurchaseOrdersPage from "@/features/inbound/pages/PurchaseOrdersPage";
-import GRNPage from "@/features/inbound/pages/GRNPage";
-import QCInspectionsPage from "@/features/inbound/pages/QCInspectionsPage";
-import PutawayPage from "@/features/inbound/pages/PutawayPage";
-import SuppliersPage from "@/features/suppliers/pages/SuppliersPage";
-// Reports
-import AnalyticsPage from "@/features/reports/pages/AnalyticsPage";
-import ReportsPage from "@/features/reports/pages/ReportsPage";
-import StockReportPage from "@/features/reports/pages/reports/StockReportPage";
-import MovementReportPage from "@/features/reports/pages/reports/MovementReportPage";
-import PurchaseRegisterPage from "@/features/reports/pages/reports/PurchaseRegisterPage";
-import SalesRegisterPage from "@/features/reports/pages/reports/SalesRegisterPage";
-import ExpiryReportPage from "@/features/reports/pages/reports/ExpiryReportPage";
-import LowStockReportPage from "@/features/reports/pages/reports/LowStockReportPage";
-import WarehouseUtilizationPage from "@/features/reports/pages/reports/WarehouseUtilizationPage";
-import AuditTrailPage from "@/features/reports/pages/reports/AuditTrailPage";
-import SystemAuditLogPage from "@/features/audit/pages/SystemAuditLogPage";
 import MobileHomePage from "@/features/mobile/pages/MobileHomePage";
 import MobilePutawayPage from "@/features/mobile/pages/MobilePutawayPage";
 import MobilePickPage from "@/features/mobile/pages/MobilePickPage";
+
+/**
+ * ─── LAZY ROUTES ────────────────────────────────────────────────────────────
+ * Everything below is a desktop back-office screen. Statically importing them
+ * pulled recharts, jspdf, xlsx and html2canvas into the bundle every worker
+ * downloads at install time, for screens their role cannot even open.
+ *
+ * Each of these becomes its own chunk under assets/lazy/, which vite.config.ts
+ * keeps OUT of the PWA precache and caches on first use instead.
+ */
+// Onboarding — a one-time, admin-only wizard
+const OnboardingWizardPage = lazy(() => import("@/features/onboarding/pages/OnboardingWizardPage"));
+// Dashboard
+const Index = lazy(() => import("./Index"));
+// Warehouse
+const WarehousesPage = lazy(() => import("@/features/warehouse/pages/WarehousesPage"));
+const MappingPage = lazy(() => import("@/features/warehouse/pages/MappingPage"));
+// Inventory
+const InventoryPage = lazy(() => import("@/features/inventory/pages/InventoryPage"));
+// Operations
+const WorkflowsPage = lazy(() => import("@/features/operations/pages/WorkflowsPage"));
+const OperationsPage = lazy(() => import("@/features/operations/pages/OperationsPage"));
+const InvoicesPage = lazy(() => import("@/features/invoices/pages/InvoicesPage"));
+// Outbound
+const CustomersPage = lazy(() => import("@/features/customers/pages/CustomersPage"));
+const CustomerDetailPage = lazy(() => import("@/features/customers/pages/CustomerDetailPage"));
+const ReturnsPage = lazy(() => import("@/features/outbound/pages/ReturnsPage"));
+const SalesOrdersPage = lazy(() => import("@/features/outbound/pages/SalesOrdersPage"));
+const PickListsPage = lazy(() => import("@/features/outbound/pages/PickListsPage"));
+const PackingPage = lazy(() => import("@/features/outbound/pages/PackingPage"));
+const ShipmentsPage = lazy(() => import("@/features/outbound/pages/ShipmentsPage"));
+const WavePlanningPage = lazy(() => import("@/features/outbound/pages/WavePlanningPage"));
+const ConsolidationPage = lazy(() => import("@/features/outbound/pages/ConsolidationPage"));
+// Inbound
+const PurchaseOrdersPage = lazy(() => import("@/features/inbound/pages/PurchaseOrdersPage"));
+const GRNPage = lazy(() => import("@/features/inbound/pages/GRNPage"));
+const QCInspectionsPage = lazy(() => import("@/features/inbound/pages/QCInspectionsPage"));
+const PutawayPage = lazy(() => import("@/features/inbound/pages/PutawayPage"));
+const SuppliersPage = lazy(() => import("@/features/suppliers/pages/SuppliersPage"));
+// Reports — every one of these renders recharts, and several export PDF/xlsx
+const AnalyticsPage = lazy(() => import("@/features/reports/pages/AnalyticsPage"));
+const ReportsPage = lazy(() => import("@/features/reports/pages/ReportsPage"));
+const StockReportPage = lazy(() => import("@/features/reports/pages/reports/StockReportPage"));
+const MovementReportPage = lazy(() => import("@/features/reports/pages/reports/MovementReportPage"));
+const PurchaseRegisterPage = lazy(() => import("@/features/reports/pages/reports/PurchaseRegisterPage"));
+const SalesRegisterPage = lazy(() => import("@/features/reports/pages/reports/SalesRegisterPage"));
+const ExpiryReportPage = lazy(() => import("@/features/reports/pages/reports/ExpiryReportPage"));
+const LowStockReportPage = lazy(() => import("@/features/reports/pages/reports/LowStockReportPage"));
+const WarehouseUtilizationPage = lazy(() => import("@/features/reports/pages/reports/WarehouseUtilizationPage"));
+const AuditTrailPage = lazy(() => import("@/features/reports/pages/reports/AuditTrailPage"));
+const SystemAuditLogPage = lazy(() => import("@/features/audit/pages/SystemAuditLogPage"));
 // Settings & Users
-import UsersPage from "@/features/users/pages/UsersPage";
-import SettingsPage from "@/features/settings/pages/SettingsPage";
-import DataSeedingPage from "@/features/settings/pages/DataSeedingPage";
-import ModuleManagementPage from "@/features/settings/pages/ModuleManagementPage";
+const UsersPage = lazy(() => import("@/features/users/pages/UsersPage"));
+const SettingsPage = lazy(() => import("@/features/settings/pages/SettingsPage"));
+const DataSeedingPage = lazy(() => import("@/features/settings/pages/DataSeedingPage"));
+const ModuleManagementPage = lazy(() => import("@/features/settings/pages/ModuleManagementPage"));
 // Notifications
-import NotificationCenterPage from "@/features/notifications/pages/NotificationCenterPage";
+const NotificationCenterPage = lazy(() => import("@/features/notifications/pages/NotificationCenterPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -79,6 +104,23 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+/**
+ * Shown while a lazy route chunk is in flight. Deliberately identical to the
+ * auth-check spinner in <ProtectedRoute /> — navigating between two screens
+ * already shows this exact treatment while the session resolves, so a chunk
+ * fetch reads as the same "working on it" state rather than a blank flash.
+ */
+function RouteFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    </div>
+  );
+}
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -114,6 +156,9 @@ const App = () => (
           {/* Offline banner, update prompt and iOS install hint — fixed overlays only,
               rendered for every route including the chrome-less /m worker screens. */}
           <PwaShell />
+          {/* One Suspense around the whole route table — the eager routes never
+              suspend, so this only ever renders for a lazy chunk fetch. */}
+          <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
@@ -171,6 +216,7 @@ const App = () => (
             
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
           </ThemeProvider>
         </AuthProvider>
       </BrowserRouter>

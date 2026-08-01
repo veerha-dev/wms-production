@@ -11,13 +11,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
-          curl -s -X POST \
-            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+          set -euo pipefail
+
+          # Without these the curl below builds a nonsense URL, gets a 401, and
+          # the job still passes — a green tick that deployed nothing. Fail loudly.
+          if [ -z "${RENDER_SERVICE_ID}" ] || [ -z "${RENDER_API_KEY}" ]; then
+            echo "::error::RENDER_SERVICE_ID and/or RENDER_API_KEY are not set."
+            echo "Set them under Settings > Secrets and variables > Actions,"
+            echo "or delete this job if Render deploys via its own GitHub integration."
+            exit 1
+          fi
+
+          status=$(curl -sS -o /tmp/render.json -w '%{http_code}' -X POST \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{}' \
-            | cat
+            -d '{}')
+
+          cat /tmp/render.json
+          echo
+
+          # Render answers 201 on a queued deploy.
+          if [ "$status" != "201" ] && [ "$status" != "200" ]; then
+            echo "::error::Render deploy request failed with HTTP ${status}"
+            exit 1
+          fi
+          echo "Render deploy queued (HTTP ${status})."
 
   # ─── Frontend → Cloudflare Pages ────────────────────────────────────────────
   deploy-frontend:

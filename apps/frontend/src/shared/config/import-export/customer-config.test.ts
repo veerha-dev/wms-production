@@ -15,6 +15,7 @@ import {
   transformRows,
   validateMappings,
 } from '@/shared/lib/import-export/csv-parser';
+import { isValidGstin, unknownGstStateCodeMessage } from '@/features/customers/types';
 
 const cfg = customerImportExportConfig.import;
 const validate = (field: string, value: string) => cfg.validators[field]?.(value, {}) ?? null;
@@ -148,6 +149,47 @@ describe('customer import — GSTIN validator', () => {
     expect(validate('gstNumber', '')).toBeNull();
     expect(validate('gstNumber', '   ')).toBeNull();
     expect(transform('gstNumber', '')).toBeNull();
+  });
+
+  it.each(['39', '88', '00', '98', '40'])(
+    'rejects a well-formed GSTIN whose state code %s was never issued',
+    (code) => {
+      // The shape passes but no State can be derived, and State decides
+      // CGST+SGST vs IGST. Importing the row would store state: null and the
+      // backend would reject it anyway — so it fails as a per-row error.
+      expect(validate('gstNumber', `${code}ABCDE1234F1Z5`)).toBe(
+        `GSTIN state code ${code} is not a valid Indian state code`
+      );
+    }
+  );
+
+  it('rejects an unissued code typed in lowercase too', () => {
+    expect(validate('gstNumber', '39abcde1234f1z5')).toBe(
+      'GSTIN state code 39 is not a valid Indian state code'
+    );
+  });
+
+  it('reports the shape error, not the state-code error, for a malformed GSTIN', () => {
+    // 'AAABCDE1234F1Z5' has no digits to report as a state code, so telling the
+    // user "state code AA is invalid" would be actively misleading.
+    expect(validate('gstNumber', 'AAABCDE1234F1Z5')).toBe('Must be a valid 15-character GSTIN');
+  });
+
+  it.each(['01', '25', '28', '38', '97', '99'])(
+    'still accepts issued code %s, including the legacy and non-state ones',
+    (code) => {
+      expect(validate('gstNumber', `${code}ABCDE1234F1Z5`)).toBeNull();
+    }
+  );
+
+  it('agrees with the customer form: same predicate, same message', () => {
+    // Both entry points call isValidGstin/unknownGstStateCodeMessage from
+    // features/customers/types, so a fix in one cannot drift from the other.
+    for (const code of ['39', '88', '00']) {
+      const gstin = `${code}ABCDE1234F1Z5`;
+      expect(isValidGstin(gstin)).toBe(false);
+      expect(validate('gstNumber', gstin)).toBe(unknownGstStateCodeMessage(gstin));
+    }
   });
 });
 
