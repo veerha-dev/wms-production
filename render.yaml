@@ -1,4 +1,19 @@
+# Veerha WMS — Render blueprint.
+#
+# Two backend services share one Dockerfile and one repo:
+#   veerha-wms-backend          → deploys from `main`,    Neon `main` branch
+#   veerha-wms-backend-staging  → deploys from `staging`, Neon `staging` branch
+#
+# The container's CMD is `node dist/database/migrate.js && node dist/main`, so
+# every boot applies any pending migrations before the app starts. Migrations are
+# additive-only, which is what makes a code-only rollback safe.
+#
+# Anything marked `sync: false` is NOT stored in this file — Render prompts for
+# it the first time the blueprint is applied, and it is edited afterwards in the
+# service's Environment tab. See dev/DEPLOYMENT.md for the full runbook.
+
 services:
+  # ─── Production ─────────────────────────────────────────────────────────────
   - type: web
     name: veerha-wms-backend
     runtime: docker
@@ -18,18 +33,113 @@ services:
       - key: JWT_REFRESH_SECRET
         generateValue: true # Render will automatically generate a secure random secret key
       - key: CORS_ORIGIN
-        sync: false # Set in dashboard to the real frontend origins, comma-separated, e.g. https://app-veerha.pages.dev,https://veerha-admin.pages.dev plus any custom domain
+        # NOTE: currently set to "*" in the dashboard, which main.ts treats as
+        # allow-all. Pin it to the real frontend origins, comma-separated, e.g.
+        # https://app-veerha.pages.dev,https://veerha-admin.pages.dev plus any
+        # custom domain.
+        sync: false
       - key: APP_URL
         sync: false # Public frontend URL used in emails, e.g. https://app-veerha.pages.dev
+      # ─── Email ──────────────────────────────────────────────────────────────
+      # RECOMMENDED PROVIDER: Resend (https://resend.com). It is plain SMTP, so
+      # the backend needs no code change — these five variables are the entire
+      # integration. Free tier: 3,000 emails/month and 100/day, which covers
+      # early tenants comfortably. Set the From domain up in Resend FIRST
+      # (Domains → Add → publish the SPF/DKIM DNS records) — an unverified
+      # domain can only send to the Resend account owner's own address.
+      # Walkthrough: dev/EMAIL-SETUP.md
+      #
+      # On boot the API logs "SMTP ready: host:port (secure=…) as user" or
+      # "SMTP VERIFY FAILED … " — check that line after changing any of these.
       - key: SMTP_HOST
-        sync: false # Leave empty to disable email (EmailService becomes a no-op)
+        sync: false # smtp.resend.com — if EMPTY, EmailService is a no-op and ALL email is silently dropped
       - key: SMTP_PORT
-        sync: false
+        sync: false # 465 (implicit TLS) — or 587 / 2587 for STARTTLS
       - key: SMTP_SECURE
-        sync: false # "true" for port 465, "false" for 587/STARTTLS
+        sync: false # "true" for port 465, "false" for 587/2587/STARTTLS
       - key: SMTP_USER
-        sync: false
+        sync: false # For Resend this is the literal string "resend" — not an email address
       - key: SMTP_PASS
-        sync: false
+        sync: false # Resend API key (re_...). Dashboard only — never in git.
       - key: SMTP_FROM
-        sync: false # e.g. "Veerha WMS <noreply@veerha.com>"
+        sync: false # e.g. "Veerha WMS <noreply@veerha.com>" — domain MUST be verified in Resend
+
+  # ─── Staging ────────────────────────────────────────────────────────────────
+  # Same image, same Dockerfile, different database and different secrets.
+  # Nothing here may point at production: the whole point of the environment is
+  # that a bad migration or a destructive bug is survivable.
+  - type: web
+    name: veerha-wms-backend-staging
+    runtime: docker
+    dockerfilePath: apps/backend/Dockerfile
+    dockerContext: .
+    # Deploy from the `staging` branch. .github/workflows/deploy-staging.yml also
+    # POSTs to the Render deploy API on every push to that branch; if you leave
+    # Render's own auto-deploy on you simply get one redundant build, which is
+    # harmless. Turn auto-deploy off in the dashboard to rely on CI alone.
+    branch: staging
+    plan: free
+    # Free instances sleep after ~15 minutes idle, so the first request after a
+    # quiet period takes ~30s to cold start. Expected — do not read it as a bug
+    # during post-deploy verification.
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        # Connection string for the Neon **staging branch** — NOT the production
+        # branch. Create it with:
+        #   Neon console → Branches → New branch → from `main`, named `staging`
+        # then copy that branch's pooled connection string. It must contain
+        # `sslmode=require` (or a neon.tech host), otherwise migrate.ts does not
+        # enable SSL and the connection is refused.
+        sync: false
+      - key: NODE_ENV
+        # Deliberately "production": staging must exercise the same code paths as
+        # production. Isolation comes from a separate database and separate
+        # secrets, not from a different NODE_ENV.
+        value: production
+      - key: PORT
+        value: 3000
+      - key: JWT_SECRET
+        # Generated per-service. A staging token must never be valid in production.
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ENABLE_API_DOCS
+        # NODE_ENV=production hides Swagger/ReDoc; re-enable them on staging so
+        # /api/docs and /api/redoc stay usable for manual testing.
+        value: 'true'
+      - key: CORS_ORIGIN
+        # Comma-separated staging origins. Cloudflare Pages gives every branch a
+        # stable alias per project:
+        #   https://staging.app-veerha.pages.dev,https://staging.veerha-admin.pages.dev
+        # Do NOT use "*" here either — staging is where you prove the pinned list
+        # is correct before applying the same treatment to production.
+        sync: false
+      - key: APP_URL
+        # Public staging frontend URL, used to build links inside emails.
+        # e.g. https://staging.app-veerha.pages.dev
+        sync: false
+      # ─── Email ──────────────────────────────────────────────────────────────
+      # Same provider as production — Resend (smtp.resend.com) — but with its
+      # OWN API key, so a leaked or revoked staging key can never touch
+      # production sending. NEVER reuse the production SMTP_PASS here.
+      # Options, cheapest first:
+      #   1. Leave SMTP_HOST EMPTY  → email is a silent no-op (today's default).
+      #   2. Resend + a staging subdomain (staging.veerha.com) verified in
+      #      Resend, so staging mail cannot be mistaken for production mail.
+      #   3. A capture service (Mailtrap/Mailpit) if you want to prove rendering
+      #      without any chance of mailing a real customer.
+      # Remember the free-tier ceiling is per Resend ACCOUNT (3,000/month,
+      # 100/day) — a chatty staging tenant eats the production allowance.
+      - key: SMTP_HOST
+        sync: false # smtp.resend.com, or empty for a silent no-op
+      - key: SMTP_PORT
+        sync: false # 465 implicit TLS; 587/2587 STARTTLS; 2525 for Mailtrap
+      - key: SMTP_SECURE
+        sync: false # "true" for port 465, "false" for 587/2587/2525
+      - key: SMTP_USER
+        sync: false # Literally "resend" for Resend; mailbox user for a capture service
+      - key: SMTP_PASS
+        sync: false # Staging-only Resend API key — set in the dashboard, never in git
+      - key: SMTP_FROM
+        sync: false # e.g. "Veerha WMS (staging) <noreply@staging.veerha.com>" — domain verified in Resend

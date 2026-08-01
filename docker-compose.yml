@@ -26,5 +26,30 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: postgres
 
+  # ─── Mail catcher — LOCAL DEVELOPMENT ONLY ─────────────────────────────────
+  # Mailpit accepts SMTP on 1025 with no auth and no TLS, and never forwards
+  # anything: every email the backend sends lands in its web UI at
+  # http://localhost:8025 instead of a real inbox.
+  #
+  # NOT for staging or production — this service must never be deployed, and no
+  # real customer address should ever be exercised through it. Point the backend
+  # at it with:
+  #   SMTP_HOST=localhost   (or `mailpit` from another container on this network)
+  #   SMTP_PORT=1025
+  #   SMTP_SECURE=false
+  #   SMTP_USER=            (empty — Mailpit takes no credentials)
+  #   SMTP_PASS=
+  # See dev/EMAIL-SETUP.md.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: veerha-mailpit
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI + REST API (/api/v1/messages)
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
 volumes:
   postgres_data:

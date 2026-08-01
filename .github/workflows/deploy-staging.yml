@@ -1,0 +1,94 @@
+name: Deploy Veerha WMS (Staging)
+
+# Mirrors deploy.yml, but targets the staging Render service and pushes both
+# Pages projects to the `staging` branch so they land on a preview URL instead
+# of the production one.
+#
+# Required secrets (see dev/DEPLOYMENT.md):
+#   RENDER_API_KEY, RENDER_STAGING_SERVICE_ID
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   VITE_API_URL_STAGING
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ─── Backend → Render (staging service) ─────────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend (Render — staging)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: |
+          curl -s -X POST \
+            "https://api.render.com/v1/services/${{ secrets.RENDER_STAGING_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            | cat
+
+  # ─── Frontend → Cloudflare Pages (staging branch) ───────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend (Cloudflare Pages — staging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=apps/frontend --legacy-peer-deps
+
+      - name: Build frontend
+        working-directory: apps/frontend
+        env:
+          VITE_API_MODE: real
+          VITE_API_URL: ${{ secrets.VITE_API_URL_STAGING }}
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # --branch=staging keeps this off the production alias; it publishes to
+          # https://staging.app-veerha.pages.dev
+          command: pages deploy apps/frontend/dist --project-name=app-veerha --branch=staging
+
+  # ─── Super Admin → Cloudflare Pages (staging branch) ────────────────────────
+  deploy-super-admin:
+    name: Deploy Super Admin (Cloudflare Pages — staging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=apps/super-admin --legacy-peer-deps
+
+      - name: Build super-admin
+        working-directory: apps/super-admin
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL_STAGING }}
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # publishes to https://staging.veerha-admin.pages.dev
+          command: pages deploy apps/super-admin/dist --project-name=veerha-admin --branch=staging

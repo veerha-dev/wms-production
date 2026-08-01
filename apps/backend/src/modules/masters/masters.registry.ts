@@ -196,7 +196,8 @@ export const DOCUMENT_TYPES: { docType: string; label: string; defaultPrefix: st
   { docType: 'invoice', label: 'Invoice', defaultPrefix: 'INV-' },
   { docType: 'transfer', label: 'Transfer', defaultPrefix: 'TRF-' },
   { docType: 'cycle_count', label: 'Cycle Count', defaultPrefix: 'CC-' },
-  { docType: 'putaway', label: 'Putaway', defaultPrefix: 'PUT-' },
+  // `PA-` matches what PutawayService actually issues; see migration 089.
+  { docType: 'putaway', label: 'Putaway', defaultPrefix: 'PA-' },
   { docType: 'return', label: 'Return', defaultPrefix: 'RET-' },
   { docType: 'task', label: 'Task', defaultPrefix: 'TSK-' },
   { docType: 'customer', label: 'Customer', defaultPrefix: 'CUST-' },

@@ -151,6 +151,10 @@ export class NotificationsService {
               entityId: row.entityId,
               recipientName: r.fullName,
               warehouseName: ctx.data?.warehouseName ?? null,
+              // Event-specific fields (e.g. the daily summary's counts) so a
+              // queue consumer can render a richer template than the generic
+              // digest row.
+              data: ctx.data ?? null,
             },
             priority: def.priority,
           });

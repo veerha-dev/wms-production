@@ -12,6 +12,12 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // vite-plugin-pwa is not loaded here, so its virtual module has to be stubbed
+      // or anything importing <App /> fails to resolve.
+      "virtual:pwa-register/react": path.resolve(
+        __dirname,
+        "./src/shared/components/pwa/pwa-register.stub.ts",
+      ),
       "@": path.resolve(__dirname, "./src"),
       "@app": path.resolve(__dirname, "./src/app"),
       "@features": path.resolve(__dirname, "./src/features"),

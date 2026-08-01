@@ -11,6 +11,7 @@ import { InventoryProvider } from "@/shared/contexts/InventoryContext";
 import { ZoneProvider } from "@/shared/contexts/ZoneContext";
 import { ProtectedRoute } from "@/features/auth/components/ProtectedRoute";
 import { ErrorBoundary } from "@/shared/components/common/ErrorBoundary";
+import { PwaShell } from "@/shared/components/pwa";
 
 // Auth
 import LoginPage from "@/features/auth/pages/LoginPage";
@@ -110,6 +111,9 @@ const App = () => (
           <ThemeProvider>
           <Toaster />
           <Sonner />
+          {/* Offline banner, update prompt and iOS install hint — fixed overlays only,
+              rendered for every route including the chrome-less /m worker screens. */}
+          <PwaShell />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />

@@ -149,7 +149,7 @@ export const DOC_TYPES: { value: string; label: string; prefix: string }[] = [
   { value: 'invoice', label: 'Invoice', prefix: 'INV-' },
   { value: 'transfer', label: 'Transfer', prefix: 'TRF-' },
   { value: 'cycle_count', label: 'Cycle Count', prefix: 'CC-' },
-  { value: 'putaway', label: 'Putaway', prefix: 'PUT-' },
+  { value: 'putaway', label: 'Putaway', prefix: 'PA-' },
   { value: 'return', label: 'Return', prefix: 'RET-' },
   { value: 'task', label: 'Task', prefix: 'TSK-' },
 ];

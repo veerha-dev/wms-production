@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { ReturnsRepository } from './returns.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { DatabaseService } from '../../database/database.service';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
@@ -12,6 +13,7 @@ export class ReturnsService {
   constructor(
     private repository: ReturnsRepository,
     private db: DatabaseService,
+    private numbering: DocumentNumberingService,
   ) {}
 
 
@@ -197,8 +199,11 @@ export class ReturnsService {
     throw new BadRequestException(`Unknown disposition: ${(payload as any).disposition}`);
   }
 
+  /**
+   * Atomic per-tenant counter (migration 078/089) instead of `count + 1`, which
+   * re-issued a number after any delete and raced under concurrency.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `RET-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'return');
   }
 }

@@ -320,11 +320,11 @@ export class CustomersRepository {
   }> {
     const res = await this.db.query(
       `SELECT
-         (SELECT COUNT(*) FROM sales_orders   WHERE customer_id = $1) AS sales_orders,
-         (SELECT COUNT(*) FROM invoices       WHERE customer_id = $1) AS invoices,
-         (SELECT COUNT(*) FROM returns        WHERE customer_id = $1) AS returns,
-         (SELECT COUNT(*) FROM serial_numbers WHERE customer_id = $1) AS serial_numbers`,
-      [id],
+         (SELECT COUNT(*) FROM sales_orders   WHERE customer_id = $1 AND tenant_id = $2) AS sales_orders,
+         (SELECT COUNT(*) FROM invoices       WHERE customer_id = $1 AND tenant_id = $2) AS invoices,
+         (SELECT COUNT(*) FROM returns        WHERE customer_id = $1 AND tenant_id = $2) AS returns,
+         (SELECT COUNT(*) FROM serial_numbers WHERE customer_id = $1 AND tenant_id = $2) AS serial_numbers`,
+      [id, tenantId],
     );
     const r = res.rows[0];
     const salesOrders = parseInt(r.sales_orders, 10);

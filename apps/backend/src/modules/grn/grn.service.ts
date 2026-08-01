@@ -5,6 +5,7 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { QcService } from '../qc/qc.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 interface AuthUser { id: string; role: string; fullName?: string | null; warehouseId?: string | null }
 
@@ -18,6 +19,7 @@ export class GrnService {
     private purchaseOrders: PurchaseOrdersService,
     private qcService: QcService,
     private readonly notifications: NotificationsService,
+    private numbering: DocumentNumberingService,
   ) {}
 
 
@@ -194,8 +196,11 @@ export class GrnService {
     return this.repository.updateItem(grnId, itemId, dto);
   }
 
+  /**
+   * Atomic per-tenant counter (migration 078/089) instead of `count + 1`, which
+   * re-issued a number after any delete and raced under concurrency.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `GRN-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'grn');
   }
 }

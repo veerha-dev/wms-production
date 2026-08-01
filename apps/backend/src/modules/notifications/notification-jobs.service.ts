@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EmailService } from '../email/email.service';
 import { DatabaseService } from '../../database/database.service';
@@ -8,6 +8,10 @@ import { findAlertType } from '../settings/notification-alert-types';
 
 const IMMEDIATE_BATCH_SIZE = 100;
 const DIGEST_BATCH_SIZE = 500;
+
+// Queued as `batched` like any low-priority alert, but rendered with its own
+// template rather than folded into the hourly digest.
+const DAILY_SUMMARY_EVENT = 'system.daily_summary';
 
 /**
  * Ceiling on how many rows one scan job considers per tenant per run. A tenant
@@ -46,6 +50,26 @@ const BATCH_EXPIRY_CRITICAL_COOLDOWN_HOURS = 20;
 const BATCH_EXPIRY_SOON_COOLDOWN_HOURS = 24 * 7;
 
 /**
+ * Namespace for the advisory lock keys so `hashtext` collisions can only ever
+ * happen between two of THESE job names, never with an unrelated lock some
+ * other part of the system takes on the same database.
+ */
+const JOB_LOCK_PREFIX = 'veerha:notification-jobs:';
+
+/**
+ * `ENABLE_SCHEDULED_JOBS=false` disables every in-process cron on this
+ * instance. Default true — an unset variable must keep the jobs running, since
+ * that is the shape of every deployment that exists today. The intended use is
+ * a split where web instances set it to false and one dedicated worker leaves
+ * it on.
+ */
+function scheduledJobsEnabled(): boolean {
+  const raw = (process.env.ENABLE_SCHEDULED_JOBS ?? '').trim().toLowerCase();
+  if (raw === '') return true;
+  return !['false', '0', 'no', 'off'].includes(raw);
+}
+
+/**
  * Background workers for the notification engine.
  *
  * Every job iterates defensively: one tenant (or one email) blowing up must
@@ -53,7 +77,7 @@ const BATCH_EXPIRY_SOON_COOLDOWN_HOURS = 24 * 7;
  * failure is recorded rather than thrown.
  */
 @Injectable()
-export class NotificationJobsService {
+export class NotificationJobsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationJobsService.name);
 
   constructor(
@@ -63,10 +87,93 @@ export class NotificationJobsService {
     private readonly email: EmailService,
   ) {}
 
+  onModuleInit(): void {
+    if (!scheduledJobsEnabled()) {
+      this.logger.warn(
+        'ENABLE_SCHEDULED_JOBS is off — notification cron jobs will not run on this instance',
+      );
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SINGLE-RUNNER GUARD
+  //
+  // Every @Cron below is registered in EVERY process. The moment the backend
+  // runs on more than one instance — Render scaling up, or simply a rolling
+  // deploy where the old and new instance overlap for a minute — each tick
+  // fires N times: N copies of the same alert email to a customer, N duplicate
+  // notification rows. That damage is user-visible and cannot be walked back.
+  //
+  // A Postgres advisory lock makes exactly one instance win each tick. The
+  // others find the lock taken and return immediately — a skipped tick is
+  // correct here, because the instance holding the lock is doing the work.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Runs `fn` only if this instance wins the advisory lock for `jobName`.
+   *
+   * The lock MUST be held on one dedicated pg client for the whole run:
+   * advisory locks are session-scoped, so taking one via `db.query()` would
+   * release it the instant the pooled connection went back to the pool — and
+   * every other instance would then sail straight through. Hence getClient().
+   *
+   * Unlock happens in `finally`, so a throwing job releases the lock rather
+   * than blocking the job forever (until that connection dies, at least).
+   */
+  private async withJobLock(jobName: string, fn: () => Promise<void>): Promise<void> {
+    if (!scheduledJobsEnabled()) {
+      this.logger.debug(`${jobName}: skipped — ENABLE_SCHEDULED_JOBS is off`);
+      return;
+    }
+
+    const lockKey = `${JOB_LOCK_PREFIX}${jobName}`;
+
+    let client;
+    try {
+      client = await this.db.getClient();
+    } catch (err) {
+      this.logger.error(`${jobName}: could not acquire a db client: ${(err as Error).message}`);
+      return;
+    }
+
+    let locked = false;
+    try {
+      const res = await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS locked', [
+        lockKey,
+      ]);
+      locked = res.rows[0]?.locked === true;
+
+      if (!locked) {
+        // Another instance owns this tick. Expected during a rolling deploy.
+        this.logger.debug(`${jobName}: skipped — another instance holds the job lock`);
+        return;
+      }
+
+      await fn();
+    } catch (err) {
+      this.logger.error(`${jobName} failed: ${(err as Error).message}`);
+    } finally {
+      if (locked) {
+        try {
+          await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]);
+        } catch (err) {
+          // The connection is discarded below on release anyway; the lock dies
+          // with the session even if this statement never lands.
+          this.logger.warn(`${jobName}: advisory unlock failed: ${(err as Error).message}`);
+        }
+      }
+      client.release();
+    }
+  }
+
   // ── Email queue: critical alerts go out now (spec Part 5) ─────────────────
 
   @Cron('0 */10 * * * *', { name: 'notifications:flush-immediate-emails' })
   async flushImmediateEmails(): Promise<void> {
+    await this.withJobLock('flush-immediate-emails', () => this.runFlushImmediateEmails());
+  }
+
+  private async runFlushImmediateEmails(): Promise<void> {
     try {
       const rows = await this.repository.claimEmailBatch('immediate', IMMEDIATE_BATCH_SIZE);
       if (rows.length === 0) return;
@@ -106,6 +213,10 @@ export class NotificationJobsService {
 
   @Cron(CronExpression.EVERY_HOUR, { name: 'notifications:flush-batched-digest' })
   async flushBatchedEmailDigest(): Promise<void> {
+    await this.withJobLock('flush-batched-digest', () => this.runFlushBatchedEmailDigest());
+  }
+
+  private async runFlushBatchedEmailDigest(): Promise<void> {
     try {
       const rows = await this.repository.claimEmailBatch('batched', DIGEST_BATCH_SIZE);
       if (rows.length === 0) return;
@@ -123,18 +234,40 @@ export class NotificationJobsService {
       for (const [, group] of byUser) {
         const ids = group.map((g) => g.id);
         try {
-          const first = group[0];
-          await this.email.sendNotificationDigestEmail({
-            to: first.toEmail,
-            recipientName: first.payload?.recipientName ?? undefined,
-            periodLabel: 'last hour',
-            items: group.map((g) => ({
-              title: g.payload?.title ?? g.subject,
-              body: g.payload?.body ?? undefined,
-              linkPath: g.payload?.linkPath ?? undefined,
-              severity: g.payload?.severity ?? undefined,
-            })),
-          });
+          // The daily summary is queued as `batched`, but rendering it as one
+          // line inside a digest ("1 alert in the last hour") throws away the
+          // stats it exists to deliver. It gets its own template.
+          const summaryRows = group.filter((g) => g.eventType === DAILY_SUMMARY_EVENT);
+          const digestRows = group.filter((g) => g.eventType !== DAILY_SUMMARY_EVENT);
+
+          for (const row of summaryRows) {
+            const d = row.payload?.data ?? {};
+            await this.email.sendDailySummaryEmail({
+              to: row.toEmail,
+              recipientName: row.payload?.recipientName ?? undefined,
+              date: d.date ?? new Date().toISOString().slice(0, 10),
+              ordersShipped: d.ordersShipped ?? 0,
+              grnsReceived: d.grnsReceived ?? 0,
+              pendingApprovals: d.pendingApprovals ?? 0,
+              lowStockCount: d.lowStockCount ?? 0,
+            });
+          }
+
+          if (digestRows.length > 0) {
+            const first = digestRows[0];
+            await this.email.sendNotificationDigestEmail({
+              to: first.toEmail,
+              recipientName: first.payload?.recipientName ?? undefined,
+              periodLabel: 'last hour',
+              items: digestRows.map((g) => ({
+                title: g.payload?.title ?? g.subject,
+                body: g.payload?.body ?? undefined,
+                linkPath: g.payload?.linkPath ?? undefined,
+                severity: g.payload?.severity ?? undefined,
+              })),
+            });
+          }
+
           await this.repository.markEmailSent(ids);
           sentCount += ids.length;
         } catch (err) {
@@ -153,6 +286,10 @@ export class NotificationJobsService {
 
   @Cron(CronExpression.EVERY_DAY_AT_6PM, { name: 'notifications:daily-summary' })
   async sendDailySummaries(): Promise<void> {
+    await this.withJobLock('daily-summary', () => this.runSendDailySummaries());
+  }
+
+  private async runSendDailySummaries(): Promise<void> {
     let tenants: Array<{ tenantId: string; recipients: string }> = [];
     try {
       tenants = await this.repository.listTenantsWithDailySummary();
@@ -185,6 +322,10 @@ export class NotificationJobsService {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'notifications:retention-purge' })
   async purgeExpiredNotifications(): Promise<void> {
+    await this.withJobLock('retention-purge', () => this.runPurgeExpiredNotifications());
+  }
+
+  private async runPurgeExpiredNotifications(): Promise<void> {
     let tenants: Array<{ id: string; retentionDays: number }> = [];
     try {
       tenants = await this.repository.listTenantsForPurge();
@@ -229,6 +370,10 @@ export class NotificationJobsService {
 
   @Cron(CronExpression.EVERY_HOUR, { name: 'notifications:putaway-overdue' })
   async scanOverduePutaways(): Promise<void> {
+    await this.withJobLock('putaway-overdue', () => this.runScanOverduePutaways());
+  }
+
+  private async runScanOverduePutaways(): Promise<void> {
     let tenants: string[] = [];
     try {
       tenants = await this.listActiveTenantIds();
@@ -311,6 +456,10 @@ export class NotificationJobsService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_7AM, { name: 'notifications:batch-expiry' })
   async scanExpiringBatches(): Promise<void> {
+    await this.withJobLock('batch-expiry', () => this.runScanExpiringBatches());
+  }
+
+  private async runScanExpiringBatches(): Promise<void> {
     let tenants: string[] = [];
     try {
       tenants = await this.listActiveTenantIds();

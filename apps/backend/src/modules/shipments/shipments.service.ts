@@ -3,6 +3,7 @@ import { ShipmentsRepository } from './shipments.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { InvoicesService } from '../invoices/invoices.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 const DISPATCH_STATUSES = new Set(['in_transit', 'in-transit', 'dispatched', 'delivered']);
 const DELIVERED_STATUSES = new Set(['delivered']);
@@ -17,6 +18,7 @@ export class ShipmentsService {
     private repository: ShipmentsRepository,
     private invoices: InvoicesService,
     private readonly notifications: NotificationsService,
+    private numbering: DocumentNumberingService,
   ) {}
 
 
@@ -108,8 +110,11 @@ export class ShipmentsService {
     return this.updateStatus(id, 'delivered', { deliveredAt: new Date() }, user);
   }
 
+  /**
+   * Atomic per-tenant counter (migration 078/089) instead of `count + 1`, which
+   * re-issued a number after any delete and raced under concurrency.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `SHP-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'shipment');
   }
 }

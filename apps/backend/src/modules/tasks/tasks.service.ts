@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { TasksRepository } from './tasks.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
 @Injectable()
 export class TasksService {
-  constructor(private repository: TasksRepository) {}
+  constructor(
+    private repository: TasksRepository,
+    private numbering: DocumentNumberingService,
+  ) {}
 
 
   async findAll(query: any, user?: AuthUser) {
@@ -59,8 +63,11 @@ export class TasksService {
     return this.repository.updateStatus(id, getCurrentTenantId(), status, extraFields);
   }
 
+  /**
+   * Atomic per-tenant counter (migration 078/089) instead of `count + 1`, which
+   * re-issued a number after any delete and raced under concurrency.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `TSK-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'task');
   }
 }

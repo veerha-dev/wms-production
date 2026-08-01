@@ -1,13 +1,17 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PutawayRepository } from './putaway.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
 
 
 
 
 @Injectable()
 export class PutawayService {
-  constructor(private repository: PutawayRepository) {}
+  constructor(
+    private repository: PutawayRepository,
+    private numbering: DocumentNumberingService,
+  ) {}
 
 
   async findAll(query: any) {
@@ -165,8 +169,12 @@ export class PutawayService {
     return this.repository.updateStatus(taskId, getCurrentTenantId(), 'cancelled');
   }
 
+  /**
+   * Atomic per-tenant counter (migration 078/089) instead of `count + 1`, which
+   * re-issued a number after any delete and raced under concurrency.
+   * The `putaway` prefix stays `PA-` — that is what live data already carries.
+   */
   private async generateCode(): Promise<string> {
-    const count = await this.repository.countByTenant(getCurrentTenantId());
-    return `PA-${String(count + 1).padStart(3, '0')}`;
+    return this.numbering.nextNumber(getCurrentTenantId(), 'putaway');
   }
 }

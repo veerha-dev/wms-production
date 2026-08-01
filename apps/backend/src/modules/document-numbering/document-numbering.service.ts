@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 
 export type DocumentType =
@@ -27,7 +27,10 @@ const DEFAULT_PREFIXES: Record<DocumentType, string> = {
   invoice: 'INV-',
   transfer: 'TRF-',
   cycle_count: 'CC-',
-  putaway: 'PUT-',
+  // `PA-`, not `PUT-`: PutawayService has always emitted PA-001, so existing
+  // putaway_tasks rows carry that prefix. Migration 089 realigns the seeded
+  // catalog rows to match rather than splitting live data across two prefixes.
+  putaway: 'PA-',
   return: 'RET-',
   task: 'TSK-',
 };
@@ -57,6 +60,13 @@ export class DocumentNumberingService {
     );
 
     const row = result.rows[0];
+    if (!row) {
+      // The counter row vanished between ensureRow and here (concurrent delete,
+      // or a rolled-back seed). Fail loudly rather than throwing a TypeError.
+      throw new InternalServerErrorException(
+        `Could not issue a ${docType} number: no document_numbering row for this tenant`,
+      );
+    }
     return this.format(row.prefix, row.issued, row.number_length);
   }
 
