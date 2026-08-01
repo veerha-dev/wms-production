@@ -193,13 +193,13 @@ Render dashboard → the service → **Environment**. Both `veerha-wms-backend` 
 | `SMTP_SECURE` | `true` for 465, `false` for 587/2587 |
 | `SMTP_USER` | `resend` — the literal word, **not** your email address |
 | `SMTP_PASS` | the `re_…` API key |
-| `SMTP_FROM` | `Veerha WMS <noreply@veerha.com>` — the domain **must** be the verified one |
+| `SMTP_FROM` | `Veerha WMS <noreply@veerha.in>` — the domain **must** be the verified one |
 | `APP_URL` | public frontend URL, e.g. `https://app-veerha.pages.dev` — every link in every email is built from it |
 
 Save; Render redeploys. Confirm in the deploy log:
 
 ```
-EmailService initialised — smtp.resend.com:465 secure=true auth=resend from="Veerha WMS <noreply@veerha.com>"
+EmailService initialised — smtp.resend.com:465 secure=true auth=resend from="Veerha WMS <noreply@veerha.in>"
 SMTP ready: smtp.resend.com:465 (secure=true) as resend
 ```
 

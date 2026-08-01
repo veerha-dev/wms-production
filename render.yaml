@@ -62,7 +62,7 @@ services:
       - key: SMTP_PASS
         sync: false # Resend API key (re_...). Dashboard only — never in git.
       - key: SMTP_FROM
-        sync: false # e.g. "Veerha WMS <noreply@veerha.com>" — domain MUST be verified in Resend
+        sync: false # e.g. "Veerha WMS <noreply@veerha.in>" — domain MUST be verified in Resend
 
   # ─── Staging ────────────────────────────────────────────────────────────────
   # Same image, same Dockerfile, different database and different secrets.
