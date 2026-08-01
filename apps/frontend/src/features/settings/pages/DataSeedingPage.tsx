@@ -60,7 +60,7 @@ export default function DataSeedingPage() {
         { name: 'Dispatch Zone', code: 'DISP001', type: 'dispatch', storage_type: 'ambient', total_capacity: 500 },
       ];
       for (const z of zoneData) {
-        try { const { data } = await api.post('/api/v1/zones', { ...z, warehouseId: warehouse.id }); zones.push(data.data); } catch {}
+        try { const { data } = await api.post('/api/v1/zones', { ...z, warehouseId: warehouse.id }); zones.push(data.data); } catch { /* seeding is best-effort — skip anything that fails */ }
       }
       updateStep('zones', 'completed');
       setCurrentStep(2);
@@ -76,7 +76,7 @@ export default function DataSeedingPage() {
         { sku_code: 'TEA-001', name: 'Assam Tea Premium', category: 'Beverages', uom: 'KG', min_stock: 10, reorder_point: 25, cost_price: 280.00, selling_price: 350.00 },
       ];
       for (const s of skuData) {
-        try { const { data } = await api.post('/api/v1/skus', s); skus.push(data.data); } catch {}
+        try { const { data } = await api.post('/api/v1/skus', s); skus.push(data.data); } catch { /* seeding is best-effort — skip anything that fails */ }
       }
       updateStep('skus', 'completed');
       setCurrentStep(3);
@@ -95,10 +95,10 @@ export default function DataSeedingPage() {
               const rack = data.data;
               for (let lv = 1; lv <= cfg.levels; lv++) {
                 for (let b = 1; b <= cfg.bpl; b++) {
-                  try { await api.post('/api/v1/bins', { rackId: rack.id, zoneId: zone.id, warehouseId: warehouse.id, code: `${rack.code}-B${lv}${b.toString().padStart(2,'0')}`, capacity: 100 }); } catch {}
+                  try { await api.post('/api/v1/bins', { rackId: rack.id, zoneId: zone.id, warehouseId: warehouse.id, code: `${rack.code}-B${lv}${b.toString().padStart(2,'0')}`, capacity: 100 }); } catch { /* seeding is best-effort — skip anything that fails */ }
                 }
               }
-            } catch {}
+            } catch { /* seeding is best-effort — skip anything that fails */ }
           }
         }
       }

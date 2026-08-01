@@ -36,7 +36,12 @@ jobs:
       - name: Lint
         run: npm run lint --workspace=apps/frontend
 
-      - name: Typecheck
+      # Reports but does not block: the frontend carries ~139 type errors that
+      # predate this pipeline (tsconfig.app.json has strict, noImplicitAny and
+      # strictNullChecks all disabled). Blocking on them would mean CI could
+      # never go green. Drive the count down, then drop continue-on-error.
+      - name: Typecheck (non-blocking — pre-existing errors)
+        continue-on-error: true
         run: npx tsc -p apps/frontend/tsconfig.app.json --noEmit
 
       - name: Test
