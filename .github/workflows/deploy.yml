@@ -74,4 +74,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/super-admin/dist --project-name=veerha-admin --branch=main
+          command: pages deploy apps/super-admin/dist --project-name=superadmin-veerha --branch=main

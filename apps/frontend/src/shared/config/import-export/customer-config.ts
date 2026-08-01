@@ -13,6 +13,7 @@ import {
   nullIfEmpty,
   defaultValue,
 } from '@/shared/lib/import-export/transformers';
+import { isValidGstin, unknownGstStateCodeMessage } from '@/features/customers/types';
 
 const customerTypes = ['b2b', 'b2c'];
 const paymentTerms = ['immediate', 'net_15', 'net_30', 'net_45', 'net_60'];
@@ -114,7 +115,17 @@ export const customerImportExportConfig: ImportExportConfig<CustomerImportData> 
       phone: required,
       customerType: oneOf(customerTypes, false),
       email: isEmail,
-      gstNumber: pattern(GSTIN_PATTERN, 'Must be a valid 15-character GSTIN'),
+      // Shape first, then the state code. A well-formed GSTIN carrying a code
+      // that was never issued (39, 88, 00, ...) has no derivable state, and
+      // state is what decides CGST+SGST vs IGST — so the row is rejected here
+      // rather than imported with a null state. Same rule as the customer form
+      // and the backend's isValidGstin().
+      gstNumber: (value) => {
+        if (!value || value.trim() === '') return null;
+        if (!GSTIN_PATTERN.test(value.trim())) return 'Must be a valid 15-character GSTIN';
+        if (!isValidGstin(value)) return unknownGstStateCodeMessage(value);
+        return null;
+      },
       panNumber: pattern(PAN_PATTERN, 'Must look like ABCDE1234F'),
       paymentTerms: oneOf(paymentTerms, false),
       status: oneOf(statuses, false),

@@ -156,6 +156,39 @@ export function stateFromGSTIN(gstin?: string | null): string | null {
 
 export const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
+/**
+ * Full GSTIN validation: the right shape AND a state code that was actually
+ * issued. Mirrors `isValidGstin()` in
+ * apps/backend/src/modules/common/gst-state-codes.ts — same regex, same map
+ * lookup, same trim+uppercase normalisation — so the two sides cannot disagree.
+ *
+ * The regex alone only proves the shape. `39ABCDE1234F1Z5` is perfectly
+ * well-formed but 39 was never issued, so no state can be derived and the
+ * customer would be saved with `state: null`. State is what decides CGST+SGST
+ * (intra-state) vs IGST (inter-state) on every invoice, so a null state is a
+ * real data problem, not a cosmetic one. The backend already rejects these;
+ * validating here turns a confusing server error into inline feedback.
+ *
+ * The two-digit prefix is guaranteed by the regex, so the plain-object lookup
+ * can never resolve through Object.prototype (`constructor`, `toString`, ...).
+ */
+export function isValidGstin(gstin?: string | null): boolean {
+  if (!gstin) return false;
+  const value = gstin.trim().toUpperCase();
+  if (!GSTIN_REGEX.test(value)) return false;
+  return GST_STATE_CODES[value.slice(0, 2)] !== undefined;
+}
+
+/**
+ * The message shown when a GSTIN is well-formed but its state code was never
+ * issued. Shared by the customer form and the Excel importer so both entry
+ * points say exactly the same thing.
+ */
+export function unknownGstStateCodeMessage(gstin?: string | null): string {
+  const code = (gstin ?? '').trim().slice(0, 2);
+  return `GSTIN state code ${code} is not a valid Indian state code`;
+}
+
 export const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
 /** Compose the flat billing address on a customer record into one line. */

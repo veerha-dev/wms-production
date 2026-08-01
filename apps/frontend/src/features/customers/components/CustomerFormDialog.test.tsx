@@ -96,20 +96,26 @@ describe('required fields', () => {
     expect(mocks.createMutate).not.toHaveBeenCalled();
   });
 
-  it('blocks a malformed email before the schema ever runs', async () => {
+  it('rejects a malformed email with an inline message', async () => {
     renderDialog();
     fillBasics();
     type('GSTIN *', '33ABCDE1234F1Z5');
     type('Email', 'not-an-email');
     submit();
 
-    await new Promise((r) => setTimeout(r, 50));
-    expect(screen.getByLabelText('Email')).toHaveAttribute('type', 'email');
+    // The input is type="text", so nothing aborts the submit before zod runs
+    // and the user gets a real FormMessage instead of a browser bubble.
+    expect(await screen.findByText('Enter a valid email address')).toBeInTheDocument();
     expect(mocks.createMutate).not.toHaveBeenCalled();
-    // The input is type="email", so native constraint validation aborts the
-    // submit and zod never runs — its message is unreachable and the user only
-    // gets the browser's own bubble, with no inline FormMessage.
-    expect(screen.queryByText('Enter a valid email address')).not.toBeInTheDocument();
+  });
+
+  it('uses type="text" + inputMode="email" so zod owns email validation', () => {
+    renderDialog();
+    const input = screen.getByLabelText('Email');
+    // type="email" would hand validation to the browser and make the schema's
+    // message unreachable — see the test above.
+    expect(input).toHaveAttribute('type', 'text');
+    expect(input).toHaveAttribute('inputmode', 'email');
   });
 
   it('sends a valid email through', async () => {
@@ -158,20 +164,77 @@ describe('B2B GSTIN validation', () => {
     expect(mocks.createMutate).not.toHaveBeenCalled();
   });
 
-  it('rejects a GSTIN whose state code is not a real state', async () => {
+  it.each(['39', '88', '00', '98'])(
+    'rejects a well-formed GSTIN on unissued state code %s',
+    async (code) => {
+      renderDialog();
+      fillBasics();
+      // The shape is fine; the state code was never issued, so no State can be
+      // derived and the CGST+SGST / IGST split would be wrong. The backend
+      // rejects these too — validating here keeps the error inline.
+      type('GSTIN *', `${code}ABCDE1234F1Z5`);
+      submit();
+
+      expect(
+        await screen.findByText(`GSTIN state code ${code} is not a valid Indian state code`)
+      ).toBeInTheDocument();
+      expect(mocks.createMutate).not.toHaveBeenCalled();
+    }
+  );
+
+  it('names the bad code rather than repeating the generic format error', async () => {
     renderDialog();
     fillBasics();
-    // 39 is not an issued state code, so State cannot be derived.
     type('GSTIN *', '39ABCDE1234F1Z5');
     submit();
 
-    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalled());
-    // KNOWN GAP: the regex accepts any two digits, so an unknown state code
-    // passes validation and is saved with a null state.
+    expect(
+      await screen.findByText('GSTIN state code 39 is not a valid Indian state code')
+    ).toBeInTheDocument();
+    // A well-formed GSTIN must not also trip the shape checks.
+    expect(
+      screen.queryByText('GSTIN format looks invalid (e.g. 33ABCDE1234F1Z5)')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('GSTIN must be exactly 15 characters')).not.toBeInTheDocument();
+  });
+
+  it('lets the user recover by correcting the state code', async () => {
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', '39ABCDE1234F1Z5');
+    submit();
+    await screen.findByText('GSTIN state code 39 is not a valid Indian state code');
+
+    type('GSTIN *', '33ABCDE1234F1Z5');
+    submit();
+
+    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalledTimes(1));
     expect(mocks.createMutate.mock.calls[0][0]).toMatchObject({
-      gstNumber: '39ABCDE1234F1Z5',
-      state: null,
+      gstNumber: '33ABCDE1234F1Z5',
+      state: 'Tamil Nadu',
     });
+  });
+
+  it.each(['97', '99'])('still accepts the non-state code %s', async (code) => {
+    // 97 (Other Territory) and 99 (Centre Jurisdiction) are genuinely issued.
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', `${code}ABCDE1234F1Z5`);
+    submit();
+
+    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalledTimes(1));
+    expect(mocks.createMutate.mock.calls[0][0]).toMatchObject({
+      gstNumber: `${code}ABCDE1234F1Z5`,
+    });
+  });
+
+  it.each(['25', '28'])('still accepts the legacy code %s on existing GSTINs', async (code) => {
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', `${code}ABCDE1234F1Z5`);
+    submit();
+
+    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalledTimes(1));
   });
 
   it('caps input at 15 characters and uppercases as you type', async () => {
@@ -316,23 +379,72 @@ describe('B2C customers', () => {
 });
 
 describe('credit limit (admin only, spec §7)', () => {
-  it('uses a number input, so non-numeric text never reaches the schema', () => {
-    renderDialog();
-    type('Credit Limit (₹)', 'lots');
-
-    // type="number" sanitises the value to '' — the schema's
-    // "Credit limit must be a number" branch is unreachable from the UI.
-    expect(screen.getByLabelText('Credit Limit (₹)')).toHaveValue(null);
-  });
-
-  it('blocks a negative credit limit at the input, not in the schema', () => {
-    // The zod schema only checks that the value parses as a number; it is the
-    // input's own type/min that stops a negative reaching the API. Worth
-    // pinning, because removing min="0" would silently allow it.
+  it('uses type="text" + inputMode="decimal" so the schema sees what was typed', () => {
     renderDialog();
     const input = screen.getByLabelText('Credit Limit (₹)');
-    expect(input).toHaveAttribute('type', 'number');
-    expect(input).toHaveAttribute('min', '0');
+    // type="number" would sanitise non-numeric text to '' and block submit via
+    // min="0", making both schema messages unreachable from the UI.
+    expect(input).toHaveAttribute('type', 'text');
+    expect(input).toHaveAttribute('inputmode', 'decimal');
+  });
+
+  it('rejects non-numeric text with an inline message', async () => {
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', '33ABCDE1234F1Z5');
+    type('Credit Limit (₹)', 'lots');
+    submit();
+
+    expect(await screen.findByText('Credit limit must be a number')).toBeInTheDocument();
+    expect(mocks.createMutate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a negative credit limit in the schema, matching the CSV importer', async () => {
+    // The importer has always rejected negatives ("Must be a positive amount").
+    // The form used to rely only on the input's min="0", so the two entry
+    // points disagreed the moment the attribute was bypassed.
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', '33ABCDE1234F1Z5');
+    type('Credit Limit (₹)', '-500');
+    submit();
+
+    expect(await screen.findByText('Credit limit cannot be negative')).toBeInTheDocument();
+    expect(mocks.createMutate).not.toHaveBeenCalled();
+  });
+
+  it('accepts zero — a real limit, not a missing one', async () => {
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', '33ABCDE1234F1Z5');
+    type('Credit Limit (₹)', '0');
+    submit();
+
+    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalledTimes(1));
+    // '0' is falsy as a string check would have it — pin that it is sent as a
+    // number, not silently turned into null.
+    expect(mocks.createMutate.mock.calls[0][0]).toMatchObject({ creditLimit: 0 });
+  });
+
+  it('accepts a decimal amount', async () => {
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', '33ABCDE1234F1Z5');
+    type('Credit Limit (₹)', '2500.50');
+    submit();
+
+    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalledTimes(1));
+    expect(mocks.createMutate.mock.calls[0][0]).toMatchObject({ creditLimit: 2500.5 });
+  });
+
+  it('treats a blank credit limit as no limit', async () => {
+    renderDialog();
+    fillBasics();
+    type('GSTIN *', '33ABCDE1234F1Z5');
+    submit();
+
+    await waitFor(() => expect(mocks.createMutate).toHaveBeenCalledTimes(1));
+    expect(mocks.createMutate.mock.calls[0][0]).toMatchObject({ creditLimit: null });
   });
 
   it('sends a numeric credit limit for an admin', async () => {
@@ -431,6 +543,20 @@ describe('quick mode (used from the Sales Order form)', () => {
       gstNumber: '24ABCDE1234F1Z5',
     });
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith({ id: 'new-1', name: 'Raj Traders' }));
+  });
+
+  it('rejects an unissued state code here too', async () => {
+    // Quick mode derives State straight from the GSTIN prefix, so an unissued
+    // code is if anything worse here — there is no State picker to correct it.
+    renderDialog({ mode: 'quick' });
+    fillBasics();
+    type('GSTIN *', '39ABCDE1234F1Z5');
+    submit();
+
+    expect(
+      await screen.findByText('GSTIN state code 39 is not a valid Indian state code')
+    ).toBeInTheDocument();
+    expect(mocks.createMutate).not.toHaveBeenCalled();
   });
 });
 

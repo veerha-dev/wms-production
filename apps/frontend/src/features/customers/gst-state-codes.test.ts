@@ -17,12 +17,15 @@ import {
   GSTIN_REGEX,
   INDIAN_STATES,
   PAN_REGEX,
+  isValidGstin,
   stateFromGSTIN,
+  unknownGstStateCodeMessage,
 } from './types';
 
 import {
   GST_STATE_CODES as BACKEND_GST_STATE_CODES,
   GSTIN_REGEX as BACKEND_GSTIN_REGEX,
+  isValidGstin as backendIsValidGstin,
   stateFromGstin as backendStateFromGstin,
 } from '../../../../backend/src/modules/common/gst-state-codes';
 
@@ -72,6 +75,13 @@ const CODE_TABLE: Array<[string, string]> = [
 
 /** A syntactically valid 13-char tail to append to a 2-digit state code. */
 const TAIL = 'ABCDE1234F1Z5';
+
+/**
+ * Two-digit codes that are well-formed but were never issued by the GST
+ * council. Valid codes are 01–38 plus 97 and 99; everything else here is a
+ * typo or a fabrication, and a GSTIN carrying one has no derivable state.
+ */
+const UNISSUED_CODES = ['00', '39', '40', '50', '55', '70', '80', '88', '96', '98'];
 
 describe('GST_STATE_CODES map', () => {
   it('has exactly the 40 codes the spec issues', () => {
@@ -207,6 +217,107 @@ describe('GSTIN_REGEX', () => {
     expect(GSTIN_REGEX.test('33ABCDE1234F1Z5')).toBe(true);
     expect(GSTIN_REGEX.test('33ABCDE1234F1Z5')).toBe(true);
   });
+
+  it.each(UNISSUED_CODES)(
+    'checks shape only — it still accepts unissued state code %s',
+    (code) => {
+      // This is the gap the regex cannot close: `[0-9]{2}` matches any two
+      // digits. That is exactly why isValidGstin() exists and why callers must
+      // use it rather than the regex on its own.
+      expect(GSTIN_REGEX.test(`${code}${TAIL}`)).toBe(true);
+      expect(isValidGstin(`${code}${TAIL}`)).toBe(false);
+    }
+  );
+});
+
+describe('isValidGstin', () => {
+  it.each(CODE_TABLE)('accepts a GSTIN on issued state code %s (%s)', (code) => {
+    expect(isValidGstin(`${code}${TAIL}`)).toBe(true);
+  });
+
+  it('accepts every issued code without exception', () => {
+    const rejected = Object.keys(GST_STATE_CODES).filter(
+      (code) => !isValidGstin(`${code}${TAIL}`)
+    );
+    expect(rejected).toEqual([]);
+  });
+
+  it.each(UNISSUED_CODES)(
+    'rejects the well-formed GSTIN on unissued state code %s',
+    (code) => {
+      // The whole point of the fix: shape is fine, state code is not, so the
+      // record cannot be saved with state: null.
+      expect(isValidGstin(`${code}${TAIL}`)).toBe(false);
+      expect(stateFromGSTIN(`${code}${TAIL}`)).toBeNull();
+    }
+  );
+
+  it('normalises case and whitespace exactly like the backend does', () => {
+    expect(isValidGstin('33abcde1234f1z5')).toBe(true);
+    expect(isValidGstin('  27ABCDE1234F1Z5  ')).toBe(true);
+    expect(isValidGstin('\t29abcde1234f1z5\n')).toBe(true);
+    // Normalisation must not rescue an unissued code.
+    expect(isValidGstin('  39abcde1234f1z5  ')).toBe(false);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['empty string', ''],
+    ['whitespace only', '   '],
+    ['too short', '33ABCDE1234F1Z'],
+    ['too long', '33ABCDE1234F1Z55'],
+    ['no Z in position 14', '33ABCDE1234F1X5'],
+    ['0 as the entity character', '33ABCDE1234F0Z5'],
+    ['digits where the PAN letters go', '33123451234F1Z5'],
+    ['letters where the state digits go', 'AAABCDE1234F1Z5'],
+    ['inner space', '33ABCDE 234F1Z5'],
+    ['bare state code with no PAN', '33'],
+  ])('rejects %s', (_label, gstin) => {
+    expect(isValidGstin(gstin as string | null | undefined)).toBe(false);
+  });
+
+  it('never resolves a state code through Object.prototype', () => {
+    // GST_STATE_CODES is a plain object literal, so a lookup could in principle
+    // hit an inherited key. The regex guarantees two digits first, which makes
+    // that unreachable — pinned here so a looser regex would fail loudly.
+    expect(isValidGstin(`constructor${TAIL}`)).toBe(false);
+    expect(isValidGstin('__proto__ABCDE')).toBe(false);
+    expect(isValidGstin(`toString${TAIL}`)).toBe(false);
+  });
+
+  it('agrees with stateFromGSTIN: valid iff a state can be derived', () => {
+    for (const code of [...Object.keys(GST_STATE_CODES), ...UNISSUED_CODES]) {
+      const gstin = `${code}${TAIL}`;
+      expect(isValidGstin(gstin)).toBe(stateFromGSTIN(gstin) !== null);
+    }
+  });
+});
+
+describe('unknownGstStateCodeMessage', () => {
+  it('names the offending code so the user knows what to fix', () => {
+    expect(unknownGstStateCodeMessage('39ABCDE1234F1Z5')).toBe(
+      'GSTIN state code 39 is not a valid Indian state code'
+    );
+    expect(unknownGstStateCodeMessage('88ABCDE1234F1Z5')).toBe(
+      'GSTIN state code 88 is not a valid Indian state code'
+    );
+    expect(unknownGstStateCodeMessage('00ABCDE1234F1Z5')).toBe(
+      'GSTIN state code 00 is not a valid Indian state code'
+    );
+  });
+
+  it('reads off the trimmed value, not the raw paste', () => {
+    expect(unknownGstStateCodeMessage('  39ABCDE1234F1Z5  ')).toBe(
+      'GSTIN state code 39 is not a valid Indian state code'
+    );
+  });
+
+  it.each([undefined, null, ''])('degrades gracefully for %s', (input) => {
+    expect(unknownGstStateCodeMessage(input)).toBe(
+      'GSTIN state code  is not a valid Indian state code'
+    );
+  });
 });
 
 describe('PAN_REGEX', () => {
@@ -287,5 +398,54 @@ describe('parity with the backend GST state map', () => {
   it('uses a byte-identical GSTIN regex on both sides', () => {
     expect(GSTIN_REGEX.source).toBe(BACKEND_GSTIN_REGEX.source);
     expect(GSTIN_REGEX.flags).toBe(BACKEND_GSTIN_REGEX.flags);
+  });
+
+  it.each(CODE_TABLE)('isValidGstin accepts code %s on both sides', (code) => {
+    const gstin = `${code}${TAIL}`;
+    expect(isValidGstin(gstin)).toBe(true);
+    expect(isValidGstin(gstin)).toBe(backendIsValidGstin(gstin));
+  });
+
+  it.each(UNISSUED_CODES)('isValidGstin rejects code %s on both sides', (code) => {
+    const gstin = `${code}${TAIL}`;
+    expect(isValidGstin(gstin)).toBe(false);
+    expect(isValidGstin(gstin)).toBe(backendIsValidGstin(gstin));
+  });
+
+  it('isValidGstin agrees with the backend on every edge case', () => {
+    // The bug this replaces was precisely a frontend/backend disagreement: the
+    // form accepted 39ABCDE1234F1Z5 and the API then rejected it, so the user
+    // got an opaque server error instead of inline feedback. Any divergence
+    // here reintroduces that.
+    const inputs = [
+      '',
+      '   ',
+      '33',
+      '33ABCDE1234F1Z5',
+      '33abcde1234f1z5',
+      '  27ABCDE1234F1Z5  ',
+      '39ABCDE1234F1Z5',
+      '00ABCDE1234F1Z5',
+      '88ABCDE1234F1Z5',
+      '98ABCDE1234F1Z5',
+      '97ABCDE1234F1Z5',
+      '99ABCDE1234F1Z5',
+      '33ABCDE1234F1Z',
+      '33ABCDE1234F1Z55',
+      'AAABCDE1234F1Z5',
+      '33ABCDE1234F0Z5',
+      '33ABCDE 234F1Z5',
+      `constructor${TAIL}`,
+    ];
+
+    const divergences = inputs
+      .map((input) => ({
+        input,
+        frontend: isValidGstin(input),
+        backend: backendIsValidGstin(input),
+      }))
+      .filter((r) => r.frontend !== r.backend);
+
+    expect(divergences).toEqual([]);
   });
 });

@@ -91,4 +91,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # publishes to https://staging.veerha-admin.pages.dev
-          command: pages deploy apps/super-admin/dist --project-name=veerha-admin --branch=staging
+          command: pages deploy apps/super-admin/dist --project-name=superadmin-veerha --branch=staging

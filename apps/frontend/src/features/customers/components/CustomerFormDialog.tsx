@@ -46,7 +46,9 @@ import {
   PAN_REGEX,
   PAYMENT_TERMS_OPTIONS,
   INDIAN_STATES,
+  isValidGstin,
   stateFromGSTIN,
+  unknownGstStateCodeMessage,
 } from '../types';
 
 const customerFormSchema = z
@@ -100,6 +102,16 @@ const customerFormSchema = z
           path: ['gstNumber'],
           message: 'GSTIN format looks invalid (e.g. 33ABCDE1234F1Z5)',
         });
+      } else if (!isValidGstin(values.gstNumber)) {
+        // Right shape, but a state code that was never issued. Without this the
+        // customer saves with state: null and every invoice picks the wrong
+        // CGST+SGST / IGST split — and the backend rejects it anyway, so the
+        // user would only find out from an opaque server error.
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['gstNumber'],
+          message: unknownGstStateCodeMessage(values.gstNumber),
+        });
       }
     }
     if (values.panNumber && !PAN_REGEX.test(values.panNumber.toUpperCase())) {
@@ -109,12 +121,24 @@ const customerFormSchema = z
         message: 'PAN must look like ABCDE1234F',
       });
     }
-    if (values.creditLimit && Number.isNaN(Number(values.creditLimit))) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['creditLimit'],
-        message: 'Credit limit must be a number',
-      });
+    if (values.creditLimit) {
+      const amount = Number(values.creditLimit);
+      if (Number.isNaN(amount)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['creditLimit'],
+          message: 'Credit limit must be a number',
+        });
+      } else if (amount < 0) {
+        // The CSV importer already rejects negatives ("Must be a positive
+        // amount"); before this the form relied only on the input's min="0",
+        // so the two entry points disagreed.
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['creditLimit'],
+          message: 'Credit limit cannot be negative',
+        });
+      }
     }
   });
 
@@ -447,7 +471,18 @@ export function CustomerFormDialog({
                         <FormItem>
                           <FormLabel>Email</FormLabel>
                           <FormControl>
-                            <Input type="email" placeholder="invoices@customer.com" {...field} />
+                            {/* Deliberately type="text": type="email" makes the
+                                browser abort the submit with its own bubble
+                                before zod ever runs, so the inline FormMessage
+                                below could never render. inputMode keeps the
+                                phone keyboard correct. */}
+                            <Input
+                              type="text"
+                              inputMode="email"
+                              autoComplete="email"
+                              placeholder="invoices@customer.com"
+                              {...field}
+                            />
                           </FormControl>
                           <FormDescription>Used to send invoices and tracking updates.</FormDescription>
                           <FormMessage />
@@ -775,7 +810,17 @@ export function CustomerFormDialog({
                           <FormItem>
                             <FormLabel>Credit Limit (₹)</FormLabel>
                             <FormControl>
-                              <Input type="number" min="0" step="0.01" placeholder="100000" {...field} />
+                              {/* type="text" for the same reason as Email:
+                                  type="number" silently discards non-numeric
+                                  input and blocks submit via min="0", so the
+                                  schema's messages never reached the user.
+                                  The schema now owns both rules. */}
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="100000"
+                                {...field}
+                              />
                             </FormControl>
                             <FormDescription>Leave blank for no limit.</FormDescription>
                             <FormMessage />

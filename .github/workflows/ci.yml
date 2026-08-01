@@ -3,7 +3,9 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # `staging` is included so a direct push there is still gated by lint,
+    # typecheck, tests and a build — deploy-staging.yml fires on the same push.
+    branches: [main, staging]
   workflow_dispatch:
 
 concurrency:
