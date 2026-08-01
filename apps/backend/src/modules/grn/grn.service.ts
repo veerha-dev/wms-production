@@ -4,8 +4,9 @@ import { getCurrentTenantId } from '../common/tenant.context';
 import { InvoicesService } from '../invoices/invoices.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { QcService } from '../qc/qc.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
-interface AuthUser { id: string; role: string; warehouseId?: string | null }
+interface AuthUser { id: string; role: string; fullName?: string | null; warehouseId?: string | null }
 
 @Injectable()
 export class GrnService {
@@ -16,6 +17,7 @@ export class GrnService {
     private invoices: InvoicesService,
     private purchaseOrders: PurchaseOrdersService,
     private qcService: QcService,
+    private readonly notifications: NotificationsService,
   ) {}
 
 
@@ -34,9 +36,39 @@ export class GrnService {
     return item;
   }
 
-  async create(dto: any) {
+  async create(dto: any, user?: AuthUser) {
+    const tenantId = getCurrentTenantId();
     const grnNumber = dto.grnNumber || await this.generateCode();
-    const { code, ...rest } = dto; return this.repository.create(getCurrentTenantId(), { ...rest, grnNumber });
+    const { code, ...rest } = dto;
+    const grn = await this.repository.create(tenantId, { ...rest, grnNumber });
+
+    // Committed — now tell the receiving warehouse's manager.
+    void this.notifyGrnCreated(tenantId, grn, user).catch(() => undefined);
+
+    return grn;
+  }
+
+  /**
+   * `grn.created` goes to the managers of the GRN's warehouse, so the
+   * warehouse id must be on the context — without it nobody is notified, by
+   * design (spec Part 7).
+   */
+  private async notifyGrnCreated(tenantId: string, grn: any, user?: AuthUser): Promise<void> {
+    if (!grn?.id) return;
+    const ctxRow = await this.repository.findNotifyContext(grn.id, tenantId).catch(() => null);
+    await this.notifications.emit('grn.created', {
+      tenantId,
+      warehouseId: ctxRow?.warehouseId ?? grn.warehouseId ?? null,
+      entityType: 'grn',
+      entityId: grn.id,
+      data: {
+        grnNumber: ctxRow?.grnNumber ?? grn.grnNumber,
+        supplierName: ctxRow?.supplierName ?? grn.supplierName,
+        warehouseName: ctxRow?.warehouseName,
+        totalItems: ctxRow?.totalItems,
+        actorUserId: user?.id,
+      },
+    });
   }
 
   async update(id: string, dto: any) {
@@ -56,7 +88,7 @@ export class GrnService {
     return stats;
   }
 
-  async updateStatus(id: string, status: string, extraFields?: Record<string, any>) {
+  async updateStatus(id: string, status: string, extraFields?: Record<string, any>, user?: AuthUser) {
     const before = await this.findOne(id);
     const updated = await this.repository.updateStatus(id, getCurrentTenantId(), status, extraFields);
 
@@ -103,9 +135,58 @@ export class GrnService {
           }
         }
       }
+
+      // Completion is the reliable point to reconcile received vs ordered: the
+      // line quantities are final here, whereas a per-item PUT is just one
+      // keystroke in the middle of a receiving session.
+      void this.notifyQtyMismatches(getCurrentTenantId(), id, before, user).catch(() => undefined);
     }
 
     return updated;
+  }
+
+  /**
+   * One `grn.qty_mismatch` per line whose received quantity differs from the
+   * quantity ordered on the PO. Admin + the warehouse's manager (both), so the
+   * warehouse id has to be on the context.
+   */
+  private async notifyQtyMismatches(
+    tenantId: string,
+    grnId: string,
+    grn: any,
+    user?: AuthUser,
+  ): Promise<void> {
+    const items: any[] = Array.isArray(grn?.items) ? grn.items : [];
+    if (items.length === 0) return;
+
+    const mismatched = items.filter((item) => {
+      const ordered = Number(item.quantityExpected ?? 0);
+      const received = Number(item.quantityReceived ?? 0);
+      return Number.isFinite(ordered) && Number.isFinite(received) && ordered !== received;
+    });
+    if (mismatched.length === 0) return;
+
+    const ctxRow = await this.repository.findNotifyContext(grnId, tenantId).catch(() => null);
+
+    for (const item of mismatched) {
+      await this.notifications.emit('grn.qty_mismatch', {
+        tenantId,
+        warehouseId: ctxRow?.warehouseId ?? grn?.warehouseId ?? null,
+        entityType: 'grn',
+        entityId: grnId,
+        data: {
+          grnNumber: ctxRow?.grnNumber ?? grn?.grnNumber,
+          warehouseName: ctxRow?.warehouseName,
+          supplierName: ctxRow?.supplierName,
+          skuId: item.skuId,
+          skuName: item.sku?.name ?? item.skus?.name,
+          skuCode: item.sku?.skuCode ?? item.skus?.sku_code,
+          orderedQty: Number(item.quantityExpected ?? 0),
+          receivedQty: Number(item.quantityReceived ?? 0),
+          actorUserId: user?.id,
+        },
+      });
+    }
   }
 
   async updateItem(grnId: string, itemId: string, dto: any) {

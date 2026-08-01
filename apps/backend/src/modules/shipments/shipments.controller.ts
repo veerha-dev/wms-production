@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, HttpCode, HttpStatus, Req } from '@nestjs/common';
 import { ShipmentsService } from './shipments.service';
 import { CreateShipmentDto, UpdateShipmentDto, QueryShipmentDto } from './dto';
 
@@ -34,5 +34,5 @@ export class ShipmentsController {
 
   @Post(':id/deliver')
   @HttpCode(HttpStatus.OK)
-  async deliver(@Param('id') id: string) { return { success: true, data: await this.service.updateStatus(id, 'delivered', { deliveredAt: new Date() }) }; }
+  async deliver(@Param('id') id: string, @Req() req: any) { return { success: true, data: await this.service.deliver(id, req.user) }; }
 }

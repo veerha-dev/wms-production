@@ -1,8 +1,21 @@
 import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { CreateInvoiceDto, UpdateInvoiceDto, QueryInvoiceDto } from './dto';
+import { Roles } from '../auth/decorators/roles.decorator';
 
+/**
+ * Invoicing is a finance surface: a warehouse worker had no business creating,
+ * editing, voiding or even listing invoices, yet not a single route carried a
+ * role. Gated at the controller so every current and future route inherits it
+ * (the global RolesGuard reads class metadata when the handler has none).
+ *
+ * This does NOT affect the two server-side auto-invoice paths — GrnService
+ * (`invoices.createFromGrn` on GRN completion) and ShipmentsService
+ * (`invoices.createFromShipment` on dispatch) call InvoicesService directly, so
+ * they never pass through this controller or its guard.
+ */
 @Controller('api/v1/invoices')
+@Roles('admin', 'manager')
 export class InvoicesController {
   constructor(private service: InvoicesService) {}
 

@@ -3,9 +3,10 @@ import { CycleCountsRepository } from './cycle-counts.repository';
 import { CreateCycleCountDto, UpdateCycleCountDto, QueryCycleCountDto } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { DatabaseService } from '../../database/database.service';
-import { EmailService } from '../email/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { StockAlertsService } from '../inventory/stock-alerts.service';
 
-interface AuthUser { id: string; role: string; warehouseId?: string | null }
+interface AuthUser { id: string; role: string; fullName?: string; warehouseId?: string | null }
 
 @Injectable()
 export class CycleCountsService {
@@ -14,7 +15,8 @@ export class CycleCountsService {
   constructor(
     private repository: CycleCountsRepository,
     private db: DatabaseService,
-    private email: EmailService,
+    private readonly notifications: NotificationsService,
+    private readonly stockAlerts: StockAlertsService,
   ) {}
 
 
@@ -66,7 +68,7 @@ export class CycleCountsService {
     return this.repository.update(getCurrentTenantId(), id, { status: 'in_progress' });
   }
 
-  async submit(id: string, items: { id: string; physicalQty: number }[]) {
+  async submit(id: string, items: { id: string; physicalQty: number }[], user?: AuthUser) {
     const cc = await this.findById(id);
     if (cc.status !== 'in_progress') {
       throw new BadRequestException(`Cannot submit count in ${cc.status} status`);
@@ -76,13 +78,42 @@ export class CycleCountsService {
 
     // Check if any variance exists
     const updated = await this.repository.findById(getCurrentTenantId(), id);
-    const hasVariance = updated?.items?.some((item: any) => item.variance !== null && item.variance !== 0);
+    const varianceItems = (updated?.items ?? []).filter(
+      (item: any) => item.variance !== null && item.variance !== 0,
+    );
+    const hasVariance = varianceItems.length > 0;
 
     await this.repository.update(getCurrentTenantId(), id, {
       status: hasVariance ? 'under_review' : 'counted',
     });
 
-    return this.repository.findById(getCurrentTenantId(), id);
+    const result = await this.repository.findById(getCurrentTenantId(), id);
+
+    // The count is submitted and its status is persisted — only now do we tell
+    // the warehouse manager there is a variance to look at.
+    if (hasVariance) {
+      const worstPct = varianceItems.reduce(
+        (max: number, item: any) => Math.max(max, Math.abs(Number(item.variancePercent ?? 0))),
+        0,
+      );
+      void this.notifications
+        .emit('cycle_count.variance_found', {
+          tenantId: getCurrentTenantId(),
+          warehouseId: cc.warehouseId ?? null,
+          entityType: 'cycle_count',
+          entityId: id,
+          data: {
+            actorUserId: user?.id ?? null,
+            countNumber: cc.countNumber,
+            varianceCount: varianceItems.length,
+            variancePct: worstPct ? worstPct.toFixed(2) : null,
+            warehouseName: cc.warehouseName ?? null,
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    return result;
   }
 
   async review(id: string, items: { id: string; action: string; notes?: string }[]) {
@@ -145,15 +176,19 @@ export class CycleCountsService {
         );
         const adjNumber = `ADJ-CC-${String(parseInt(adjNumberRes.rows[0].c, 10) + 1).padStart(4, '0')}`;
         await client.query(
+          // `location` is NOT NULL in stock_adjustments — omitting it made every
+          // approve() fail with 23502 before the reconciliation could commit.
           `INSERT INTO stock_adjustments
              (tenant_id, adjustment_number, sku_id, sku_code, sku_name, warehouse_id,
+              location_id, location,
               quantity_before, quantity_after, adjustment_qty, adjustment_type,
               reason, reason_category, status, requested_by, approved_by, approved_at, applied_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'cycle_count',
-                   $10, 'cycle_count', 'approved', $11, $11, NOW(), NOW())`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'cycle_count',
+                   $12, 'cycle_count', 'approved', $13, $13, NOW(), NOW())`,
           [
             tid, adjNumber, item.skuId, item.skuCode || '', item.skuName || '',
             cc.warehouseId || null,
+            item.binId || null, item.binCode || cc.warehouseName || 'Warehouse',
             item.systemQty ?? 0, item.physicalQty ?? 0, variance,
             `Cycle count ${cc.countNumber} variance reconciliation`,
             user?.id || null,
@@ -189,6 +224,18 @@ export class CycleCountsService {
       );
     });
 
+    // AFTER COMMIT. Each reconciled line moved quantity_available by exactly its
+    // variance, so the variance IS the delta the threshold watchdog needs.
+    this.stockAlerts.evaluate({
+      tenantId: tid,
+      actorUserId: user?.id ?? null,
+      changes: items.map((item: any) => ({
+        skuId: item.skuId,
+        warehouseId: cc.warehouseId ?? null,
+        delta: Number(item.variance) || 0,
+      })),
+    });
+
     // Clone next instance if recurring
     await this.cloneNextRecurrence(id);
 
@@ -211,7 +258,8 @@ export class CycleCountsService {
   }
 
   /**
-   * Escalate to admin (possible theft / damage). Keeps status under_review and emails admins.
+   * Escalate to admin (possible theft / damage). Keeps status under_review and raises
+   * `cycle_count.variance_escalated`, which routes to admins in-app and by email.
    */
   async escalate(id: string, user?: AuthUser, notes?: string) {
     const cc = await this.findById(id);
@@ -230,23 +278,25 @@ export class CycleCountsService {
       [id, user?.id || null, notes || 'Escalated for investigation', tid],
     );
 
-    // Notify all admins
-    const admins = await this.db.query<{ email: string; full_name: string }>(
-      `SELECT email, full_name FROM users WHERE tenant_id = $1 AND role = 'admin' AND is_active = true`,
-      [tid],
-    );
-    for (const admin of admins.rows) {
-      this.email
-        .sendApprovalRequestEmail({
-          to: admin.email,
-          fullName: admin.full_name,
-          requestType: 'Cycle count escalation',
-          requestedBy: user?.id || 'a manager',
-          detail: `Cycle count ${cc.countNumber} has been escalated. ${notes || ''}`,
-          linkPath: `/operations`,
-        })
-        .catch(() => undefined);
-    }
+    // The escalation is persisted — raise it through the notification engine,
+    // which now owns admin routing, the in-app row, the approvals inbox entry
+    // and the email. (This replaced a hand-rolled per-admin email loop.)
+    void this.notifications
+      .emit('cycle_count.variance_escalated', {
+        tenantId: tid,
+        warehouseId: cc.warehouseId ?? null,
+        entityType: 'cycle_count',
+        entityId: id,
+        data: {
+          actorUserId: user?.id ?? null,
+          countNumber: cc.countNumber,
+          escalatedBy: user?.fullName ?? 'A manager',
+          reason: notes || 'Escalated for investigation',
+          varianceCount: cc.varianceCount ?? null,
+          warehouseName: cc.warehouseName ?? null,
+        },
+      })
+      .catch(() => undefined);
 
     return this.findById(id);
   }

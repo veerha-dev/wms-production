@@ -6,6 +6,7 @@ import {
   AdjustStockDto, CreateMovementDto, QueryInventoryDto, QueryMovementsDto,
 } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { StockAlertsService } from './stock-alerts.service';
 
 
 
@@ -16,6 +17,7 @@ export class InventoryService {
 
     private repository: InventoryRepository,
     private db: DatabaseService,
+    private readonly stockAlerts: StockAlertsService,
   ) {}
 
   // ─── Stock Levels CRUD ─────────────────────────────────────
@@ -35,18 +37,70 @@ export class InventoryService {
     return sl;
   }
 
-  async createStockLevel(dto: CreateStockLevelDto) {
-    return this.repository.createStockLevel(getCurrentTenantId(), dto);
+  async createStockLevel(dto: CreateStockLevelDto, actorUserId?: string | null) {
+    const tenantId = getCurrentTenantId();
+    const created = await this.repository.createStockLevel(tenantId, dto);
+
+    // A brand-new row starts from nothing, so `before` is 0 and the delta is
+    // whatever was seeded. Fire-and-forget — never awaited, never throws.
+    this.stockAlerts.evaluate({
+      tenantId,
+      actorUserId,
+      changes: [
+        {
+          skuId: created?.skuId ?? dto.skuId,
+          warehouseId: created?.warehouseId ?? dto.warehouseId,
+          delta: Number(dto.quantityAvailable ?? 0),
+        },
+      ],
+    });
+
+    return created;
   }
 
-  async updateStockLevel(id: string, dto: UpdateStockLevelDto) {
-    await this.findStockLevelById(id);
-    return this.repository.updateStockLevel(getCurrentTenantId(), id, dto);
+  async updateStockLevel(id: string, dto: UpdateStockLevelDto, actorUserId?: string | null) {
+    const tenantId = getCurrentTenantId();
+    // The row as it stands BEFORE the write — the exact previous available qty.
+    const before = await this.findStockLevelById(id);
+    const updated = await this.repository.updateStockLevel(tenantId, id, dto);
+
+    if (dto.quantityAvailable !== undefined) {
+      this.stockAlerts.evaluate({
+        tenantId,
+        actorUserId,
+        changes: [
+          {
+            skuId: before.skuId,
+            warehouseId: before.warehouseId,
+            delta: Number(dto.quantityAvailable) - Number(before.quantityAvailable ?? 0),
+          },
+        ],
+      });
+    }
+
+    return updated;
   }
 
-  async deleteStockLevel(id: string) {
-    await this.findStockLevelById(id);
-    return this.repository.deleteStockLevel(getCurrentTenantId(), id);
+  async deleteStockLevel(id: string, actorUserId?: string | null) {
+    const tenantId = getCurrentTenantId();
+    const before = await this.findStockLevelById(id);
+    const deleted = await this.repository.deleteStockLevel(tenantId, id);
+
+    if (deleted) {
+      this.stockAlerts.evaluate({
+        tenantId,
+        actorUserId,
+        changes: [
+          {
+            skuId: before.skuId,
+            warehouseId: before.warehouseId,
+            delta: -Number(before.quantityAvailable ?? 0),
+          },
+        ],
+      });
+    }
+
+    return deleted;
   }
 
   // ─── Low Stock & Expiring ─────────────────────────────────
@@ -76,14 +130,19 @@ export class InventoryService {
 
   // ─── Transfer (Transactional) ──────────────────────────────
 
-  async transferStock(dto: TransferStockDto) {
+  async transferStock(dto: TransferStockDto, actorUserId?: string | null) {
     const { skuId, fromBinId, toBinId, quantity, batchId } = dto;
 
     if (fromBinId === toBinId) {
       throw new BadRequestException('Source and destination bins must be different');
     }
 
-    return this.db.transaction(async (client) => {
+    const tenantId = getCurrentTenantId();
+    // Captured inside the transaction, consumed only after it has committed.
+    let sourceWarehouseId: string | null = null;
+    let destWarehouseId: string | null = null;
+
+    const result = await this.db.transaction(async (client) => {
       // 1. Check destination bin is not locked
       const destBin = await client.query('SELECT id, is_locked FROM bins WHERE id = $1', [toBinId]);
       if (destBin.rows.length === 0) throw new NotFoundException('Destination bin not found');
@@ -114,6 +173,8 @@ export class InventoryService {
 
       // 4. Increment destination (upsert)
       const warehouseId = dto.warehouseId || sourceStock.rows[0].warehouse_id;
+      sourceWarehouseId = sourceStock.rows[0].warehouse_id ?? null;
+      destWarehouseId = warehouseId ?? null;
       let destQuery = 'SELECT id FROM stock_levels WHERE tenant_id = $1 AND sku_id = $2 AND bin_id = $3';
       const destParams: any[] = [getCurrentTenantId(), skuId, toBinId];
       if (batchId) {
@@ -147,14 +208,33 @@ export class InventoryService {
 
       return { success: true, movementNumber: movNum, quantity, fromBinId, toBinId };
     });
+
+    // AFTER COMMIT. A bin-to-bin move inside one warehouse nets to zero and
+    // therefore raises nothing; only a cross-warehouse move can cross a
+    // threshold.
+    this.stockAlerts.evaluate({
+      tenantId,
+      actorUserId,
+      changes: [
+        { skuId, warehouseId: sourceWarehouseId, delta: -Number(quantity) },
+        { skuId, warehouseId: destWarehouseId, delta: Number(quantity) },
+      ],
+    });
+
+    return result;
   }
 
   // ─── Adjustment (Transactional) ────────────────────────────
 
-  async adjustStock(dto: AdjustStockDto) {
+  async adjustStock(dto: AdjustStockDto, actorUserId?: string | null) {
     const { skuId, binId, quantity, reason, batchId, notes } = dto;
 
-    return this.db.transaction(async (client) => {
+    const tenantId = getCurrentTenantId();
+    // Captured inside the transaction, consumed only after it has committed.
+    let affectedWarehouseId: string | null = dto.warehouseId ?? null;
+    let availableDelta = 0;
+
+    const result = await this.db.transaction(async (client) => {
       // 1. Find existing stock at this bin
       let stockQuery = 'SELECT * FROM stock_levels WHERE tenant_id = $1 AND sku_id = $2 AND bin_id = $3';
       const stockParams: any[] = [getCurrentTenantId(), skuId, binId];
@@ -185,22 +265,27 @@ export class InventoryService {
 
       // 3. Update or create stock level
       if (existing.rows.length > 0) {
+        affectedWarehouseId = existing.rows[0].warehouse_id ?? affectedWarehouseId;
         if (reason === 'damage') {
           // Move to damaged
           await client.query(
             'UPDATE stock_levels SET quantity_available = quantity_available - $1, quantity_damaged = quantity_damaged + $1, last_updated = NOW() WHERE id = $2',
             [Math.abs(quantity), existing.rows[0].id],
           );
+          availableDelta = -Math.abs(quantity);
         } else {
           await client.query(
             'UPDATE stock_levels SET quantity_available = quantity_available + $1, last_updated = NOW() WHERE id = $2',
             [quantity, existing.rows[0].id],
           );
+          availableDelta = Number(quantity);
         }
       } else if (quantity > 0) {
         // Create new stock entry
         const warehouseResult = await client.query('SELECT warehouse_id FROM bins WHERE id = $1', [binId]);
         const warehouseId = dto.warehouseId || warehouseResult.rows[0]?.warehouse_id;
+        affectedWarehouseId = warehouseId ?? affectedWarehouseId;
+        availableDelta = Number(quantity);
         await client.query(
           `INSERT INTO stock_levels (tenant_id, sku_id, warehouse_id, bin_id, batch_id, quantity_available)
            VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -221,5 +306,15 @@ export class InventoryService {
 
       return { success: true, movementNumber: movNum, adjustment: quantity, reason };
     });
+
+    // AFTER COMMIT — threshold crossings are derived from the signed delta this
+    // adjustment applied to quantity_available.
+    this.stockAlerts.evaluate({
+      tenantId,
+      actorUserId,
+      changes: [{ skuId, warehouseId: affectedWarehouseId, delta: availableDelta }],
+    });
+
+    return result;
   }
 }

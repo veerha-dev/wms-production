@@ -3,6 +3,7 @@ import { PickListsRepository } from './pick-lists.repository';
 import { GeneratePickListDto } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
@@ -11,6 +12,7 @@ export class PickListsService {
   constructor(
     private repository: PickListsRepository,
     private numbering: DocumentNumberingService,
+    private readonly notifications: NotificationsService,
   ) {}
 
 
@@ -153,6 +155,40 @@ export class PickListsService {
   async updateStatus(id: string, status: string, extraFields?: Record<string, any>) {
     await this.findOne(id);
     return this.repository.updateStatus(id, getCurrentTenantId(), status, extraFields);
+  }
+
+  /**
+   * Completing a pick list is what tells the warehouse manager the order is
+   * ready to pack, so it is its own method rather than a bare status write:
+   * the manager of THAT warehouse gets notified once the state change has
+   * actually landed. `warehouseId` is passed on purpose — without it the
+   * engine notifies no manager at all (notifications.service, resolveRecipients).
+   */
+  async complete(id: string, user?: AuthUser) {
+    const tenantId = getCurrentTenantId();
+    const pickList = await this.findOne(id);
+    const updated = await this.repository.updateStatus(id, tenantId, 'completed', {
+      completedAt: new Date(),
+    });
+
+    void this.notifications
+      .emit('pick_list.completed', {
+        tenantId,
+        warehouseId: pickList.warehouseId ?? null,
+        entityType: 'pick_list',
+        entityId: id,
+        data: {
+          actorUserId: user?.id,
+          pickListNumber: pickList.pickListNumber,
+          code: pickList.pickListNumber,
+          warehouseName: pickList.warehouseName,
+          pickerName: pickList.assigneeName,
+          totalItems: pickList.items?.length ?? pickList.itemCount ?? null,
+        },
+      })
+      .catch(() => undefined);
+
+    return updated;
   }
 
   /**

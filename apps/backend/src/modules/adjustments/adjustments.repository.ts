@@ -24,13 +24,23 @@ export class AdjustmentsRepository {
       paramIndex++;
     }
     if (type) {
-      conditions.push(`a.type = $${paramIndex}`);
+      conditions.push(`a.adjustment_type = $${paramIndex}`);
       params.push(type);
       paramIndex++;
     }
 
-    const allowedSort = ['adjustment_number', 'type', 'status', 'quantity', 'created_at', 'requested_at'];
-    const safeSort = allowedSort.includes(sortBy) ? sortBy : 'created_at';
+    // API field name → real column (013_create_adjustments.sql).
+    const sortColumns: Record<string, string> = {
+      adjustment_number: 'adjustment_number',
+      type: 'adjustment_type',
+      adjustment_type: 'adjustment_type',
+      status: 'status',
+      quantity: 'adjustment_qty',
+      adjustment_qty: 'adjustment_qty',
+      created_at: 'created_at',
+      requested_at: 'requested_at',
+    };
+    const safeSort = sortColumns[sortBy] ?? 'created_at';
     const safeOrder = sortOrder?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     const where = conditions.join(' AND ');
 
@@ -90,14 +100,17 @@ export class AdjustmentsRepository {
     const params: any[] = [id, tenantId];
     let idx = 3;
 
+    // DTO field → real column. `stock_adjustments` has no `type`, `quantity`,
+    // `bin_id` or `notes` column: the bin FK is `location_id`, and the type and
+    // quantity are `adjustment_type` / `adjustment_qty`. `notes` has no column
+    // at all, so it is not persisted (the free-text field is `reason`).
     const mappings: Record<string, string> = {
-      type: 'type',
+      type: 'adjustment_type',
       skuId: 'sku_id',
       warehouseId: 'warehouse_id',
-      binId: 'bin_id',
-      quantity: 'quantity',
+      binId: 'location_id',
+      quantity: 'adjustment_qty',
       reason: 'reason',
-      notes: 'notes',
     };
 
     for (const [key, col] of Object.entries(mappings)) {
@@ -141,23 +154,36 @@ export class AdjustmentsRepository {
     return result.rows[0] ? this.mapRow(result.rows[0]) : null;
   }
 
+  /**
+   * Column names follow 013_create_adjustments.sql. `quantity` in particular is
+   * stored as `adjustment_qty`; reading the non-existent `row.quantity` made
+   * every mapped adjustment report `quantity: undefined`, which silently
+   * disarmed the manager approval threshold in AdjustmentsService.approve()
+   * (`Number(existing.quantity ?? 0)` collapsed to 0, and `0 > 100` is false,
+   * so a manager could approve any adjustment however large).
+   */
   private mapRow(row: any) {
     return {
       id: row.id,
       tenantId: row.tenant_id,
       adjustmentNumber: row.adjustment_number,
-      type: row.type,
+      type: row.adjustment_type,
       skuId: row.sku_id,
+      skuCode: row.sku_code,
+      skuName: row.sku_name,
       warehouseId: row.warehouse_id,
-      binId: row.bin_id,
-      quantity: row.quantity,
+      binId: row.location_id,
+      location: row.location,
+      quantity: row.adjustment_qty,
+      quantityBefore: row.quantity_before,
+      quantityAfter: row.quantity_after,
       reason: row.reason,
+      reasonCategory: row.reason_category,
       status: row.status,
       requestedBy: row.requested_by,
       approvedBy: row.approved_by,
       requestedAt: row.requested_at,
       approvedAt: row.approved_at,
-      notes: row.notes,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

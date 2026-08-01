@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Req } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import {
   CreateStockLevelDto, UpdateStockLevelDto, TransferStockDto,
@@ -42,20 +42,20 @@ export class InventoryController {
   }
 
   @Post()
-  async createStockLevel(@Body() dto: CreateStockLevelDto) {
-    const data = await this.service.createStockLevel(dto);
+  async createStockLevel(@Body() dto: CreateStockLevelDto, @Req() req: any) {
+    const data = await this.service.createStockLevel(dto, req?.user?.id);
     return { success: true, data };
   }
 
   @Post('transfer')
-  async transferStock(@Body() dto: TransferStockDto) {
-    const data = await this.service.transferStock(dto);
+  async transferStock(@Body() dto: TransferStockDto, @Req() req: any) {
+    const data = await this.service.transferStock(dto, req?.user?.id);
     return { success: true, data };
   }
 
   @Post('adjustment')
-  async adjustStock(@Body() dto: AdjustStockDto) {
-    const data = await this.service.adjustStock(dto);
+  async adjustStock(@Body() dto: AdjustStockDto, @Req() req: any) {
+    const data = await this.service.adjustStock(dto, req?.user?.id);
     return { success: true, data };
   }
 
@@ -66,14 +66,14 @@ export class InventoryController {
   }
 
   @Put(':id')
-  async updateStockLevel(@Param('id') id: string, @Body() dto: UpdateStockLevelDto) {
-    const data = await this.service.updateStockLevel(id, dto);
+  async updateStockLevel(@Param('id') id: string, @Body() dto: UpdateStockLevelDto, @Req() req: any) {
+    const data = await this.service.updateStockLevel(id, dto, req?.user?.id);
     return { success: true, data };
   }
 
   @Delete(':id')
-  async deleteStockLevel(@Param('id') id: string) {
-    await this.service.deleteStockLevel(id);
+  async deleteStockLevel(@Param('id') id: string, @Req() req: any) {
+    await this.service.deleteStockLevel(id, req?.user?.id);
     return { success: true, data: { deleted: true } };
   }
 }

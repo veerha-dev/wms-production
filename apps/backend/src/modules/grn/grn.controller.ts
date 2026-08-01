@@ -22,7 +22,7 @@ export class GrnController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() dto: CreateGrnDto) { return { success: true, data: await this.service.create(dto) }; }
+  async create(@Body() dto: CreateGrnDto, @Req() req: any) { return { success: true, data: await this.service.create(dto, req.user) }; }
 
   @Put(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateGrnDto) { return { success: true, data: await this.service.update(id, dto) }; }
@@ -41,5 +41,5 @@ export class GrnController {
 
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
-  async complete(@Param('id') id: string) { return { success: true, data: await this.service.updateStatus(id, 'completed', { receivedDate: new Date() }) }; }
+  async complete(@Param('id') id: string, @Req() req: any) { return { success: true, data: await this.service.updateStatus(id, 'completed', { receivedDate: new Date() }, req.user) }; }
 }

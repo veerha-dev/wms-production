@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/shared/components/layout/AppLayout';
 import {
   Package,
@@ -20,15 +21,52 @@ import { CycleCountPage } from '@/features/inventory/components/CycleCountPage';
 import { StockTransferPage } from '@/features/inventory/components/StockTransferPage';
 import { useRealtimeInventory } from '@/features/inventory/hooks/useRealtimeInventory';
 
+/**
+ * The tab ids below are the `value` of each TabsTrigger and are the contract
+ * the notification registry links against
+ * (`/inventory?tab=stock-levels&sku=…&filter=low_stock`). A notification must
+ * open the exact place where the user can act, so the active tab is driven by
+ * the `tab` search param rather than a hardcoded default.
+ */
+const TAB_IDS = [
+  'overview',
+  'sku-master',
+  'stock-levels',
+  'batch-expiry',
+  'transfers',
+  'damaged',
+  'adjustments',
+  'cycle-count',
+] as const;
+
+const DEFAULT_TAB = 'overview';
+
 export default function InventoryPage() {
   // Enable realtime subscriptions for inventory data
   useRealtimeInventory();
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+  const activeTab = (TAB_IDS as readonly string[]).includes(requestedTab ?? '')
+    ? (requestedTab as string)
+    : DEFAULT_TAB;
+
+  // Keep the tab in the URL so the page stays linkable/refreshable, without
+  // discarding the other params a notification link carries (sku, batch,
+  // adjustment, filter, ...).
+  const handleTabChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === DEFAULT_TAB) next.delete('tab');
+    else next.set('tab', value);
+    setSearchParams(next, { replace: true });
+  };
+
   return (
     <AppLayout
       title="Inventory Management"
       breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Inventory' }]}
     >
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="flex flex-wrap h-auto gap-1 p-1 bg-muted/50">
           <TabsTrigger value="overview" className="gap-2 data-[state=active]:bg-background">
             <Package className="h-4 w-4" />

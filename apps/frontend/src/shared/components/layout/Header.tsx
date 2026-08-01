@@ -1,16 +1,8 @@
 import { useWMS } from '@/shared/contexts/WMSContext';
-import { Bell, Search, HelpCircle, ChevronRight } from 'lucide-react';
+import { Search, HelpCircle, ChevronRight } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/shared/components/ui/dropdown-menu';
-import { Badge } from '@/shared/components/ui/badge';
+import { NotificationCenter } from '@/shared/components/NotificationCenter';
 
 interface HeaderProps {
   title: string;
@@ -59,55 +51,7 @@ export function Header({ title, breadcrumbs }: HeaderProps) {
           </div>
 
           {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative h-9 w-9">
-                <Bell className="h-4 w-4" />
-                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-destructive" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80 bg-popover">
-              <DropdownMenuLabel className="flex items-center justify-between">
-                Notifications
-                <Badge variant="secondary" className="text-xs">3 new</Badge>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="flex flex-col items-start gap-1 p-3 cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-warning" />
-                  <span className="font-medium text-sm">Low Stock Alert</span>
-                </div>
-                <p className="text-xs text-muted-foreground pl-4">
-                  SKU-7823 is below minimum threshold
-                </p>
-                <span className="text-xs text-muted-foreground pl-4">2 min ago</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex flex-col items-start gap-1 p-3 cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-success" />
-                  <span className="font-medium text-sm">Task Completed</span>
-                </div>
-                <p className="text-xs text-muted-foreground pl-4">
-                  Batch #B-4521 putaway completed
-                </p>
-                <span className="text-xs text-muted-foreground pl-4">15 min ago</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex flex-col items-start gap-1 p-3 cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-info" />
-                  <span className="font-medium text-sm">New User Added</span>
-                </div>
-                <p className="text-xs text-muted-foreground pl-4">
-                  John Smith joined as Manager
-                </p>
-                <span className="text-xs text-muted-foreground pl-4">1 hour ago</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-center justify-center text-sm text-accent cursor-pointer">
-                View all notifications
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <NotificationCenter />
 
           {/* Help */}
           <Button variant="ghost" size="icon" className="h-9 w-9">

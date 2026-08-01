@@ -38,8 +38,8 @@ export class UsersController {
   }
 
   @Post()
-  async create(@Body() dto: CreateUserDto) {
-    const data = await this.service.create(dto);
+  async create(@Body() dto: CreateUserDto, @Request() req: any) {
+    const data = await this.service.create(dto, req.user?.id);
     return { success: true, data };
   }
 
@@ -47,7 +47,7 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   async invite(@Body() dto: CreateUserDto, @Request() req: any) {
     const invitedByName = req.user?.fullName || req.user?.email;
-    const data = await this.service.invite({ ...dto, invitedByName });
+    const data = await this.service.invite({ ...dto, invitedByName, invitedById: req.user?.id });
     return { success: true, data };
   }
 
@@ -55,7 +55,7 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   async inviteBulk(@Body() body: { invites: CreateUserDto[] }, @Request() req: any) {
     const invitedByName = req.user?.fullName || req.user?.email;
-    const data = await this.service.inviteBulk(body.invites || [], invitedByName);
+    const data = await this.service.inviteBulk(body.invites || [], invitedByName, req.user?.id);
     return { success: true, data };
   }
 

@@ -93,6 +93,43 @@ export class GrnRepository {
     return parseInt(res.rows[0].count, 10);
   }
 
+  /**
+   * The display fields a notification needs — warehouse name in particular,
+   * which `mapRow` does not carry but every inbound notification title uses to
+   * say *where* something happened. Read-only and best-effort: the caller
+   * treats a null as "emit with what we already have".
+   */
+  async findNotifyContext(id: string, tenantId: string): Promise<{
+    grnId: string;
+    grnNumber: string | null;
+    warehouseId: string | null;
+    warehouseName: string | null;
+    supplierName: string | null;
+    totalItems: number;
+  } | null> {
+    const res = await this.db.query(`
+      SELECT g.id, g.grn_number, g.warehouse_id,
+             w.name AS warehouse_name,
+             s.name AS supplier_name,
+             (SELECT count(*) FROM grn_items WHERE grn_id = g.id) AS item_count
+      FROM grn g
+      LEFT JOIN warehouses w ON g.warehouse_id = w.id
+      LEFT JOIN purchase_orders po ON g.po_id = po.id
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
+      WHERE g.id = $1 AND g.tenant_id = $2
+    `, [id, tenantId]);
+    const r = res.rows[0];
+    if (!r) return null;
+    return {
+      grnId: r.id,
+      grnNumber: r.grn_number,
+      warehouseId: r.warehouse_id,
+      warehouseName: r.warehouse_name,
+      supplierName: r.supplier_name,
+      totalItems: r.item_count ? parseInt(r.item_count, 10) : 0,
+    };
+  }
+
   async create(tenantId: string, dto: any): Promise<any> {
     const poId = dto.poId || dto.purchase_order_id || dto.po_id || null;
     const warehouseId = dto.warehouseId || dto.warehouse_id || null;

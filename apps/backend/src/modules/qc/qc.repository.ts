@@ -88,6 +88,46 @@ export class QcRepository {
     return parseInt(res.rows[0].count, 10);
   }
 
+  /**
+   * Inspections carry no warehouse of their own — they inherit it from the GRN
+   * they were raised against. Notifications need it, because a warehouse
+   * manager must only ever see their own warehouse's QC failures.
+   */
+  async findNotifyContext(id: string, tenantId: string): Promise<{
+    inspectionId: string;
+    qcNumber: string | null;
+    grnId: string | null;
+    grnNumber: string | null;
+    warehouseId: string | null;
+    warehouseName: string | null;
+    skuName: string | null;
+    skuCode: string | null;
+  } | null> {
+    const res = await this.db.query(`
+      SELECT q.id, q.qc_number, q.grn_id,
+             g.grn_number, g.warehouse_id,
+             w.name AS warehouse_name,
+             sk.name AS sku_name, sk.code AS sku_code
+      FROM qc_inspections q
+      LEFT JOIN grn g ON q.grn_id = g.id
+      LEFT JOIN warehouses w ON g.warehouse_id = w.id
+      LEFT JOIN skus sk ON q.sku_id = sk.id
+      WHERE q.id = $1 AND q.tenant_id = $2
+    `, [id, tenantId]);
+    const r = res.rows[0];
+    if (!r) return null;
+    return {
+      inspectionId: r.id,
+      qcNumber: r.qc_number,
+      grnId: r.grn_id,
+      grnNumber: r.grn_number,
+      warehouseId: r.warehouse_id,
+      warehouseName: r.warehouse_name,
+      skuName: r.sku_name,
+      skuCode: r.sku_code,
+    };
+  }
+
   async create(tenantId: string, dto: any): Promise<any> {
     const res = await this.db.query(
       `INSERT INTO qc_inspections (tenant_id, qc_number, grn_id, sku_id, batch_number, status, notes)

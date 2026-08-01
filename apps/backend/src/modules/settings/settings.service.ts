@@ -7,6 +7,7 @@ import {
   UpdateNotificationConfigDto,
 } from './dto';
 import { NOTIFICATION_ALERT_TYPES, findAlertType } from './notification-alert-types';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const toSnake = (s: string) => s.replace(/([A-Z])/g, '_$1').toLowerCase();
 
@@ -113,7 +114,10 @@ const TENANT_INFO_FIELDS: Record<string, string> = {
 
 @Injectable()
 export class SettingsService {
-  constructor(private db: DatabaseService) {}
+  constructor(
+    private db: DatabaseService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // ─── User Preferences ───────────────────────────────────────────────────────
 
@@ -378,12 +382,27 @@ export class SettingsService {
 
   // ─── Test Notification ──────────────────────────────────────────────────────
 
-  async sendTestNotification(tenantId: string) {
-    await this.db.query(
-      `INSERT INTO inventory_alerts (tenant_id, type, severity, title, message, is_acknowledged)
-       VALUES ($1, 'system', 'info', 'Test Notification', 'This is a test notification from Settings. Your alerts are working correctly.', false)`,
-      [tenantId],
-    );
+  /**
+   * "Send test notification" has to prove the REAL delivery path works, so it
+   * goes through the engine (registry → recipient resolution → insert → socket
+   * → email queue) instead of writing a row into the legacy `inventory_alerts`
+   * table that no other code path produces any more.
+   *
+   * `system.test_notification` has recipients 'user', so it lands on exactly
+   * the person who clicked the button and on nobody else. Awaited rather than
+   * fire-and-forget: the caller is asking "did it work?", and emit() never
+   * throws by contract.
+   */
+  async sendTestNotification(tenantId: string, userId?: string) {
+    if (!userId) {
+      throw new BadRequestException('A signed-in user is required to send a test notification');
+    }
+    await this.notifications.emit('system.test_notification', {
+      tenantId,
+      userId,
+      entityType: 'user',
+      entityId: userId,
+    });
   }
 
   // ─── Approval Rules ─────────────────────────────────────────────────────────

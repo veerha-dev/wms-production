@@ -2,8 +2,12 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ShipmentsRepository } from './shipments.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { InvoicesService } from '../invoices/invoices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const DISPATCH_STATUSES = new Set(['in_transit', 'in-transit', 'dispatched', 'delivered']);
+const DELIVERED_STATUSES = new Set(['delivered']);
+
+interface AuthUser { id: string; role: string; warehouseId?: string | null }
 
 @Injectable()
 export class ShipmentsService {
@@ -12,6 +16,7 @@ export class ShipmentsService {
   constructor(
     private repository: ShipmentsRepository,
     private invoices: InvoicesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
 
@@ -49,7 +54,7 @@ export class ShipmentsService {
     return stats;
   }
 
-  async updateStatus(id: string, status: string, extraFields?: Record<string, any>) {
+  async updateStatus(id: string, status: string, extraFields?: Record<string, any>, user?: AuthUser) {
     const before = await this.findOne(id);
     const updated = await this.repository.updateStatus(id, getCurrentTenantId(), status, extraFields);
 
@@ -69,7 +74,38 @@ export class ShipmentsService {
       }
     }
 
+    // Delivery confirmation — raised once, on the transition into 'delivered',
+    // and only after the row has actually been updated. The registry marks this
+    // event batched by default; the tenant's settings decide whether it is
+    // delivered at all, so the emit is unconditional here.
+    const wasDelivered = DELIVERED_STATUSES.has((before.status || '').toLowerCase());
+    const nowDelivered = DELIVERED_STATUSES.has(status.toLowerCase());
+    if (updated && nowDelivered && !wasDelivered) {
+      void this.notifications
+        .emit('shipment.delivered', {
+          tenantId: getCurrentTenantId(),
+          warehouseId: before.warehouseId ?? null,
+          entityType: 'shipment',
+          entityId: id,
+          data: {
+            actorUserId: user?.id,
+            shipmentNumber: before.shipmentNumber,
+            code: before.shipmentNumber,
+            courierName: before.carrier,
+            customerName: before.salesOrder?.customer?.name ?? null,
+            orderNumber: before.salesOrder?.soNumber ?? null,
+            deliveredAt: (extraFields?.deliveredAt ?? new Date()).toString(),
+          },
+        })
+        .catch(() => undefined);
+    }
+
     return updated;
+  }
+
+  /** Courier confirmed delivery. Kept separate so the actor can be excluded. */
+  async deliver(id: string, user?: AuthUser) {
+    return this.updateStatus(id, 'delivered', { deliveredAt: new Date() }, user);
   }
 
   private async generateCode(): Promise<string> {

@@ -7,6 +7,9 @@ import {
   inviteEmail,
   passwordResetEmail,
   approvalRequestEmail,
+  notificationEmail,
+  notificationDigestEmail,
+  dailySummaryEmail,
 } from './templates';
 
 export interface SendMailParams {
@@ -150,6 +153,87 @@ export class EmailService implements OnModuleInit {
     await this.send({
       to: params.to,
       subject: `Approval required: ${params.requestType}`,
+      html,
+    });
+  }
+
+  // ─── Notification engine ────────────────────────────────────────────────
+  // The notification email queue owns subject construction (`[Veerha] {title}`,
+  // spec Part 5); these helpers only render and send.
+
+  /** Exposed so the queue worker can build `${APP_URL}${link_path}` links. */
+  getAppUrl(): string {
+    return this.appUrl || 'http://localhost:8080';
+  }
+
+  async sendNotificationEmail(params: {
+    to: string;
+    subject: string;
+    recipientName?: string;
+    title: string;
+    body?: string;
+    severity?: string;
+    category?: string;
+    entityType?: string;
+    entityId?: string;
+    warehouseName?: string;
+    linkPath?: string;
+  }) {
+    const html = notificationEmail({
+      recipientName: params.recipientName,
+      title: params.title,
+      body: params.body,
+      severity: params.severity,
+      category: params.category,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      warehouseName: params.warehouseName,
+      link: `${this.getAppUrl()}${params.linkPath || '/'}`,
+    });
+    await this.send({ to: params.to, subject: params.subject, html });
+  }
+
+  async sendNotificationDigestEmail(params: {
+    to: string;
+    recipientName?: string;
+    periodLabel?: string;
+    items: Array<{ title: string; body?: string; linkPath?: string; severity?: string }>;
+  }) {
+    const appUrl = this.getAppUrl();
+    const periodLabel = params.periodLabel || 'last hour';
+    const html = notificationDigestEmail({
+      recipientName: params.recipientName,
+      periodLabel,
+      items: params.items.map((i) => ({
+        title: i.title,
+        body: i.body,
+        severity: i.severity,
+        link: `${appUrl}${i.linkPath || '/'}`,
+      })),
+      appUrl,
+    });
+    await this.send({
+      to: params.to,
+      subject: `[Veerha] ${params.items.length} alert${params.items.length === 1 ? '' : 's'} in the ${periodLabel}`,
+      html,
+    });
+  }
+
+  async sendDailySummaryEmail(params: {
+    to: string;
+    recipientName?: string;
+    tenantName?: string;
+    date: string;
+    ordersShipped: number;
+    grnsReceived: number;
+    pendingApprovals: number;
+    lowStockCount: number;
+    topAlerts?: Array<{ title: string; severity?: string }>;
+  }) {
+    const html = dailySummaryEmail({ ...params, appUrl: this.getAppUrl() });
+    await this.send({
+      to: params.to,
+      subject: `[Veerha] Daily summary — ${params.date}`,
       html,
     });
   }

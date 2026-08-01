@@ -2,10 +2,12 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PurchaseOrdersRepository } from './purchase-orders.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { DocumentNumberingService } from '../document-numbering/document-numbering.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface AuthUser {
   id: string;
   role: string;
+  fullName?: string | null;
   warehouseId?: string | null;
 }
 
@@ -14,6 +16,7 @@ export class PurchaseOrdersService {
   constructor(
     private repository: PurchaseOrdersRepository,
     private numbering: DocumentNumberingService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(query: any) {
@@ -76,7 +79,7 @@ export class PurchaseOrdersService {
 
     // Auto-approve: If creator is Admin, auto-approve
     if (user?.role === 'admin') {
-      return this.approveOrder(id, user);
+      return this.approveOrder(id, user, po);
     }
 
     // Check approval rules for threshold
@@ -88,20 +91,74 @@ export class PurchaseOrdersService {
     if (rule && rule.isActive) {
       if (calculatedTotal <= rule.thresholdAmount) {
         // Auto-approve as it's below the threshold
-        return this.approveOrder(id, { id: 'system', role: 'admin' });
+        return this.approveOrder(id, { id: 'system', role: 'admin' }, po);
       }
     }
 
     // Otherwise, route to Admin (Submitted status)
-    return this.updateStatus(id, 'submitted', { rejectionReason: null });
+    const updated = await this.updateStatus(id, 'submitted', { rejectionReason: null });
+
+    // The PO now genuinely awaits an admin decision — tell them, but only
+    // after the status change has committed. Fire-and-forget: a notification
+    // must never fail or delay a submission.
+    void this.notifications
+      .emit('po.submitted', {
+        tenantId,
+        warehouseId: po.warehouse_id ?? null,
+        entityType: 'purchase_order',
+        entityId: id,
+        data: {
+          poNumber: po.po_number,
+          supplierName: po.supplier_name,
+          warehouseName: po.warehouse_name,
+          totalAmount: calculatedTotal || po.total_amount,
+          submittedBy: user?.fullName || 'A user',
+          actorUserId: user?.id,
+        },
+      })
+      .catch(() => undefined);
+
+    return updated;
   }
 
-  private async approveOrder(id: string, user?: { id: string; role: string }) {
-    return this.updateStatus(id, 'approved', {
+  /**
+   * `po` is the record as it looked before the update — passed in by every
+   * caller so the notification can name the supplier/warehouse without a
+   * second round trip.
+   */
+  private async approveOrder(
+    id: string,
+    user?: { id: string; role: string; fullName?: string | null },
+    po?: any,
+  ) {
+    const updated = await this.updateStatus(id, 'approved', {
       approvedBy: user?.id || null,
       approvedAt: new Date(),
       rejectionReason: null
     });
+
+    // Outcome goes back to whoever raised the PO (recipients: 'user').
+    const creatorId = po?.created_by ?? updated?.created_by ?? null;
+    if (creatorId) {
+      void this.notifications
+        .emit('po.approved', {
+          tenantId: getCurrentTenantId(),
+          warehouseId: po?.warehouse_id ?? updated?.warehouse_id ?? null,
+          userId: creatorId,
+          entityType: 'purchase_order',
+          entityId: id,
+          data: {
+            poNumber: po?.po_number ?? updated?.po_number,
+            supplierName: po?.supplier_name,
+            warehouseName: po?.warehouse_name,
+            approvedBy: user?.fullName || 'An admin',
+            actorUserId: user?.id,
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async approve(id: string, user?: AuthUser) {
@@ -112,7 +169,7 @@ export class PurchaseOrdersService {
     if (user?.role !== 'admin') {
       throw new ForbiddenException('Only administrators can approve purchase orders');
     }
-    return this.approveOrder(id, user);
+    return this.approveOrder(id, user, po);
   }
 
   async reject(id: string, reason: string, user?: AuthUser) {
@@ -126,11 +183,35 @@ export class PurchaseOrdersService {
     if (!reason || reason.trim() === '') {
       throw new BadRequestException('Rejection reason is required');
     }
-    return this.updateStatus(id, 'draft', {
+    const updated = await this.updateStatus(id, 'draft', {
       rejectionReason: reason,
       approvedBy: null,
       approvedAt: null,
     });
+
+    // Outcome (with the reason) goes back to the PO's creator.
+    const creatorId = po?.created_by ?? updated?.created_by ?? null;
+    if (creatorId) {
+      void this.notifications
+        .emit('po.rejected', {
+          tenantId: getCurrentTenantId(),
+          warehouseId: po?.warehouse_id ?? null,
+          userId: creatorId,
+          entityType: 'purchase_order',
+          entityId: id,
+          data: {
+            poNumber: po?.po_number,
+            supplierName: po?.supplier_name,
+            warehouseName: po?.warehouse_name,
+            rejectedBy: user?.fullName || 'An admin',
+            reason,
+            actorUserId: user?.id,
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async recall(id: string, user?: AuthUser) {

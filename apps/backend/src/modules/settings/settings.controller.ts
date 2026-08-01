@@ -105,8 +105,10 @@ export class SettingsController {
 
   @Post('notifications/test')
   @HttpCode(HttpStatus.OK)
-  async sendTestNotification() {
-    await this.service.sendTestNotification(getCurrentTenantId());
+  async sendTestNotification(@Request() req: any) {
+    // The test notification is delivered to the caller only, so the engine
+    // needs the caller's id.
+    await this.service.sendTestNotification(getCurrentTenantId(), req.user?.id);
     return { success: true, message: 'Test notification sent' };
   }
 

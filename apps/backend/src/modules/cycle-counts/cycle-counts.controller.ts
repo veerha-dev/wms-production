@@ -48,8 +48,12 @@ export class CycleCountsController {
 
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)
-  async submit(@Param('id') id: string, @Body() body: { items: { id: string; physicalQty: number }[] }) {
-    return { success: true, data: await this.service.submit(id, body.items) };
+  async submit(
+    @Param('id') id: string,
+    @Body() body: { items: { id: string; physicalQty: number }[] },
+    @Req() req: any,
+  ) {
+    return { success: true, data: await this.service.submit(id, body.items, req?.user) };
   }
 
   @Post(':id/review')

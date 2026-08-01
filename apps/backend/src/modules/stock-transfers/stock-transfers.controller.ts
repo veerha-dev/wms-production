@@ -52,8 +52,8 @@ export class StockTransfersController {
 
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
-  async complete(@Param('id') id: string) {
-    return { success: true, data: await this.service.complete(id) };
+  async complete(@Param('id') id: string, @Req() req: any) {
+    return { success: true, data: await this.service.complete(id, req?.user) };
   }
 
   @Post(':id/cancel')

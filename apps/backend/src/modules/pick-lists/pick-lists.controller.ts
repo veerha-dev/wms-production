@@ -58,7 +58,7 @@ export class PickListsController {
 
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
-  async complete(@Param('id') id: string) { return { success: true, data: await this.service.updateStatus(id, 'completed', { completedAt: new Date() }) }; }
+  async complete(@Param('id') id: string, @Req() req: any) { return { success: true, data: await this.service.complete(id, req.user) }; }
 
   @Post(':id/pick/:itemId')
   @HttpCode(HttpStatus.OK)

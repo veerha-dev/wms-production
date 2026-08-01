@@ -5,6 +5,7 @@ import { DatabaseService } from '../../database/database.service';
 import { CreateUserDto, UpdateUserDto, QueryUserDto } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { EmailService } from '../email/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface BulkInviteResult {
   invited: number;
@@ -19,6 +20,7 @@ export class UsersService {
     private repository: UsersRepository,
     private db: DatabaseService,
     private email: EmailService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(query: QueryUserDto) {
@@ -36,7 +38,7 @@ export class UsersService {
     return user;
   }
 
-  async create(dto: CreateUserDto & { password?: string }) {
+  async create(dto: CreateUserDto & { password?: string }, actorUserId?: string) {
     const existing = await this.repository.findByEmail(getCurrentTenantId(), dto.email);
     if (existing) throw new ConflictException(`User with email ${dto.email} already exists`);
 
@@ -46,7 +48,9 @@ export class UsersService {
       passwordHash = await bcrypt.hash(dto.password, 12);
     }
 
-    return this.repository.create(getCurrentTenantId(), { ...dto, passwordHash });
+    const user = await this.repository.create(getCurrentTenantId(), { ...dto, passwordHash });
+    this.announceUserActivated(user, actorUserId);
+    return user;
   }
 
   async update(id: string, dto: UpdateUserDto) {
@@ -65,7 +69,7 @@ export class UsersService {
     return this.repository.delete(getCurrentTenantId(), id);
   }
 
-  async invite(dto: CreateUserDto & { password?: string; invitedByName?: string }) {
+  async invite(dto: CreateUserDto & { password?: string; invitedByName?: string; invitedById?: string }) {
     const existing = await this.repository.findByEmail(getCurrentTenantId(), dto.email);
     if (existing) throw new ConflictException(`User with email ${dto.email} already exists`);
 
@@ -101,20 +105,103 @@ export class UsersService {
       })
       .catch(() => undefined);
 
+    // The invited user is created ACTIVE with a temporary password, so this
+    // insert is the moment they become a member of the organisation — there is
+    // no separate "accept invitation" endpoint to hook (see the report).
+    this.announceUserActivated(user, dto.invitedById, warehouseName);
+
     // Do NOT return tempPassword to the client. It's been emailed.
     return { ...user, emailed: true };
+  }
+
+  // ─── Notifications (spec Part 2 — system events) ───────────────────────────
+
+  /**
+   * Raised once a user row exists and is active: tells the admins somebody
+   * joined, then re-checks the plan's seat usage.
+   *
+   * Fire-and-forget by construction — a notification must never roll back or
+   * fail a user creation.
+   */
+  private announceUserActivated(user: any, actorUserId?: string, warehouseName?: string) {
+    if (!user?.id) return;
+    const tenantId = getCurrentTenantId();
+
+    if (user.isActive !== false) {
+      void this.notifications
+        .emit('user.joined', {
+          tenantId,
+          // Users are a company-wide concern; the registry marks the event
+          // companyWide so managers are still resolved without a warehouse.
+          warehouseId: user.warehouseId ?? null,
+          entityType: 'user',
+          entityId: user.id,
+          data: {
+            actorUserId,
+            fullName: user.fullName || user.full_name || user.email,
+            email: user.email,
+            role: user.role,
+            warehouseName,
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    void this.checkPlanLimits(tenantId).catch(() => undefined);
+  }
+
+  /**
+   * Seat usage against the tenant's plan, evaluated after every user insert.
+   *
+   * NOTE: no `actorUserId` is passed. Unlike "X approved your request", a plan
+   * limit is a billing state of the whole organisation — the admin who just
+   * consumed the last seat is precisely the person who has to act on it, so
+   * excluding them would silence the only useful recipient.
+   */
+  private async checkPlanLimits(tenantId: string): Promise<void> {
+    const res = await this.db.query(
+      `SELECT t.max_users,
+              COALESCE(p.name, 'current') AS plan_name,
+              (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) AS used
+         FROM tenants t
+         LEFT JOIN plans p ON p.id = t.plan_id
+        WHERE t.id = $1`,
+      [tenantId],
+    );
+    const row = res.rows[0];
+    const limit = Number(row?.max_users);
+    const used = Number(row?.used);
+    if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used)) return;
+
+    const ratio = used / limit;
+    if (ratio < 0.9) return;
+
+    const eventType = ratio >= 1 ? 'plan.limit_reached' : 'plan.limit_approaching';
+    await this.notifications.emit(eventType, {
+      tenantId,
+      entityType: 'tenant',
+      entityId: tenantId,
+      data: {
+        limitType: 'users',
+        used,
+        limit,
+        percentUsed: Math.round(ratio * 100),
+        planName: row.plan_name,
+      },
+    });
   }
 
   async inviteBulk(
     invites: Array<CreateUserDto & { password?: string }>,
     invitedByName?: string,
+    invitedById?: string,
   ): Promise<BulkInviteResult> {
     const result: BulkInviteResult = { invited: 0, failed: 0, errors: [], users: [] };
 
     for (let i = 0; i < invites.length; i++) {
       const dto = invites[i];
       try {
-        const user = await this.invite({ ...dto, invitedByName });
+        const user = await this.invite({ ...dto, invitedByName, invitedById });
         result.invited++;
         result.users.push({
           id: user.id,

@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { DocumentNumberingModule } from './modules/document-numbering/document-numbering.module';
 import { OperationsSettingsModule } from './modules/operations-settings/operations-settings.module';
 import { MastersModule } from './modules/masters/masters.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { WarehousesModule } from './modules/warehouses/warehouses.module';
 import { ZonesModule } from './modules/zones/zones.module';
@@ -96,6 +97,7 @@ import { PresenceModule } from './modules/presence/presence.module';
     PackConsolidationModule,
     PickWavesModule,
     PresenceModule,
+    NotificationsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

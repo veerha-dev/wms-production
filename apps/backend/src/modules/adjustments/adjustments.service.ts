@@ -3,6 +3,7 @@ import { AdjustmentsRepository } from './adjustments.repository';
 import { CreateAdjustmentDto, UpdateAdjustmentDto, QueryAdjustmentDto } from './dto';
 import { SkusRepository } from '../skus/skus.repository';
 import { getCurrentTenantId } from '../common/tenant.context';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Per workflow doc: adjustments above this threshold require Admin approval.
 // Managers cannot approve their own large adjustments — must go to Admin.
@@ -11,6 +12,7 @@ const APPROVAL_THRESHOLD = 100;
 interface AuthUser {
   id: string;
   role: string;
+  fullName?: string;
   warehouseId?: string | null;
 }
 
@@ -19,6 +21,7 @@ export class AdjustmentsService {
   constructor(
     private repository: AdjustmentsRepository,
     private skusRepository: SkusRepository,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(query: QueryAdjustmentDto) {
@@ -63,6 +66,27 @@ export class AdjustmentsService {
       return this.repository.approve(getCurrentTenantId(), created.id, requestedBy ?? undefined);
     }
 
+    // The row is committed and still pending → it needs an admin decision.
+    // requiresAction on this event puts it in the inline approvals inbox.
+    void this.notifications
+      .emit('adjustment.approval_pending', {
+        tenantId: getCurrentTenantId(),
+        warehouseId: dto.warehouseId ?? null,
+        entityType: 'stock_adjustment',
+        entityId: created.id,
+        data: {
+          actorUserId: requestedBy,
+          adjustmentNumber,
+          requestedBy: user?.fullName ?? 'A user',
+          quantity: dto.quantity,
+          skuId: dto.skuId,
+          skuCode: sku.code,
+          skuName: sku.name,
+          reason: dto.reason ?? null,
+        },
+      })
+      .catch(() => undefined);
+
     return created;
   }
 
@@ -102,7 +126,27 @@ export class AdjustmentsService {
       }
     }
 
-    return this.repository.approve(getCurrentTenantId(), id, user?.id);
+    const approved = await this.repository.approve(getCurrentTenantId(), id, user?.id);
+
+    // Outcome goes to the REQUESTER only (registry: defaultRecipients 'user').
+    if (existing.requestedBy) {
+      void this.notifications
+        .emit('adjustment.approved', {
+          tenantId: getCurrentTenantId(),
+          userId: existing.requestedBy,
+          warehouseId: existing.warehouseId ?? null,
+          entityType: 'stock_adjustment',
+          entityId: id,
+          data: {
+            actorUserId: user?.id ?? null,
+            adjustmentNumber: existing.adjustmentNumber,
+            approvedBy: user?.fullName ?? 'An admin',
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    return approved;
   }
 
   async reject(id: string, user?: AuthUser) {
@@ -117,6 +161,25 @@ export class AdjustmentsService {
       );
     }
 
-    return this.repository.reject(getCurrentTenantId(), id, user?.id);
+    const rejected = await this.repository.reject(getCurrentTenantId(), id, user?.id);
+
+    if (existing.requestedBy) {
+      void this.notifications
+        .emit('adjustment.rejected', {
+          tenantId: getCurrentTenantId(),
+          userId: existing.requestedBy,
+          warehouseId: existing.warehouseId ?? null,
+          entityType: 'stock_adjustment',
+          entityId: id,
+          data: {
+            actorUserId: user?.id ?? null,
+            adjustmentNumber: existing.adjustmentNumber,
+            rejectedBy: user?.fullName ?? 'An admin',
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    return rejected;
   }
 }

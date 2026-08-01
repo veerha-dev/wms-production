@@ -64,6 +64,8 @@ import UsersPage from "@/features/users/pages/UsersPage";
 import SettingsPage from "@/features/settings/pages/SettingsPage";
 import DataSeedingPage from "@/features/settings/pages/DataSeedingPage";
 import ModuleManagementPage from "@/features/settings/pages/ModuleManagementPage";
+// Notifications
+import NotificationCenterPage from "@/features/notifications/pages/NotificationCenterPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -125,6 +127,8 @@ const App = () => (
             <Route path="/analytics" element={<ProtectedLayout><AnalyticsPage /></ProtectedLayout>} />
             <Route path="/users" element={<ProtectedLayout><UsersPage /></ProtectedLayout>} />
             <Route path="/settings" element={<ProtectedLayout><SettingsPage /></ProtectedLayout>} />
+            {/* Every authenticated role can see their own notifications — no module gate */}
+            <Route path="/notifications" element={<ProtectedLayout><NotificationCenterPage /></ProtectedLayout>} />
             <Route path="/seed-data" element={<ProtectedLayout><DataSeedingPage /></ProtectedLayout>} />
             
             <Route path="/inbound" element={<ProtectedLayout><PurchaseOrdersPage /></ProtectedLayout>} />

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Patch, Body, Param, Query, HttpCode, HttpStatus, Req } from '@nestjs/common';
 import { QcService } from './qc.service';
 import { CreateQcDto, UpdateQcDto, QueryQcDto } from './dto';
 
@@ -20,7 +20,7 @@ export class QcController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() dto: CreateQcDto) { return { success: true, data: await this.service.create(dto) }; }
+  async create(@Body() dto: CreateQcDto, @Req() req: any) { return { success: true, data: await this.service.create(dto, req.user) }; }
 
   @Put(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateQcDto) { return { success: true, data: await this.service.update(id, dto) }; }
@@ -38,11 +38,11 @@ export class QcController {
 
   @Post(':id/fail')
   @HttpCode(HttpStatus.OK)
-  async fail(@Param('id') id: string, @Body() body: { notes?: string }) { return { success: true, data: await this.service.updateStatus(id, 'completed', { result: 'failed', completedAt: new Date(), notes: body.notes }) }; }
+  async fail(@Param('id') id: string, @Body() body: { notes?: string }, @Req() req: any) { return { success: true, data: await this.service.updateStatus(id, 'completed', { result: 'failed', completedAt: new Date(), notes: body.notes }, req.user) }; }
 
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
-  async complete(@Param('id') id: string, @Body() body: { result: string; notes?: string }) { return { success: true, data: await this.service.updateStatus(id, 'completed', { result: body.result, completedAt: new Date(), notes: body.notes }) }; }
+  async complete(@Param('id') id: string, @Body() body: { result: string; notes?: string }, @Req() req: any) { return { success: true, data: await this.service.updateStatus(id, 'completed', { result: body.result, completedAt: new Date(), notes: body.notes }, req.user) }; }
 
   @Post(':id/defects')
   @HttpCode(HttpStatus.OK)
