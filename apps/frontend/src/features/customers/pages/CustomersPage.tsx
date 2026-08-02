@@ -200,8 +200,12 @@ export default function CustomersPage() {
 
       {/* Filters + actions */}
       <div className="wms-card mb-6">
-        <div className="p-4 flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
-          <div className="flex flex-col md:flex-row gap-3 flex-1 w-full">
+        {/* Wraps on available width rather than at a viewport breakpoint: the
+            sidebar takes 256px, so `xl:` (1280px window) fired while the
+            toolbar itself only had ~1024px and pushed the page into a
+            horizontal scroll, sliding content under the fixed sidebar. */}
+        <div className="p-4 flex flex-wrap gap-4 items-center justify-between">
+          <div className="flex flex-col md:flex-row flex-wrap gap-3 flex-1 min-w-0">
             <div className="relative md:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -270,7 +274,7 @@ export default function CustomersPage() {
             </Select>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 shrink-0">
             <ImportButton
               config={customerImportExportConfig}
               size="sm"
