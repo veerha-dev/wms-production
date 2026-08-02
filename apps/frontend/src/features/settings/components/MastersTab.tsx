@@ -569,9 +569,9 @@ function BarcodeSection({ canWrite }: { canWrite: boolean }) {
             onValueChange={(v) => set('labelSize', v)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="small">Small (38 × 25 mm)</SelectItem>
-              <SelectItem value="medium">Medium (50 × 25 mm)</SelectItem>
-              <SelectItem value="large">Large (100 × 50 mm)</SelectItem>
+              <SelectItem value="small">Small (38.1 × 21.2 mm — Avery L7651, 65/sheet)</SelectItem>
+              <SelectItem value="medium">Medium (63.5 × 38.1 mm — Avery L7160, 21/sheet)</SelectItem>
+              <SelectItem value="large">Large (99.1 × 67.7 mm — Avery L7165, 8/sheet)</SelectItem>
             </SelectContent>
           </Select>
         </Field>

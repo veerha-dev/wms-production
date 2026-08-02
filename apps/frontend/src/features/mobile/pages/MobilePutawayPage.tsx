@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card } from '@/shared/components/ui/card';
 import { Button } from '@/shared/components/ui/button';
-import { Input } from '@/shared/components/ui/input';
 import { Badge } from '@/shared/components/ui/badge';
-import { ArrowLeft, Boxes, CheckCircle2, ScanLine, MapPin, XCircle } from 'lucide-react';
+import { ArrowLeft, Boxes, CheckCircle2, MapPin, XCircle } from 'lucide-react';
 import { api } from '@/shared/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/shared/contexts/AuthContext';
+import { ScanField } from '../components/ScanField';
 
 interface PutawayTask {
   id: string;
@@ -54,6 +54,19 @@ export default function MobilePutawayPage() {
 
   const selected = tasks.find((t) => t.id === selectedId);
 
+  /**
+   * One submit path for all three triggers: the Confirm button, an Enter from a
+   * keyboard-wedge scanner, and a camera read.
+   */
+  const confirmBin = useCallback(
+    (barcode: string) => {
+      // Posted exactly as decoded/typed — the backend owns barcode matching.
+      if (!barcode || !selectedId || scanBin.isPending) return;
+      scanBin.mutate({ id: selectedId, barcode });
+    },
+    [scanBin, selectedId]
+  );
+
   if (selectedId && selected) {
     return (
       <div className="min-h-screen bg-background p-4">
@@ -79,20 +92,29 @@ export default function MobilePutawayPage() {
           </Card>
 
           <Card className="p-4 space-y-3">
-            <div className="text-sm font-medium flex items-center gap-1">
-              <ScanLine className="h-4 w-4" /> Scan bin barcode to confirm
-            </div>
-            <Input
+            {/*
+              submitOnScan: a camera read of the bin label confirms immediately.
+              The value being posted is the *only* thing this call carries, the
+              worker is already staring at the destination bin printed above,
+              and a mismatch is rejected by the backend with a toast rather than
+              changing any stock — so a confirmation tap would only cost a
+              gloved hand a second per carton without preventing anything.
+            */}
+            <ScanField
+              label="Scan bin barcode to confirm"
+              cameraLabel="Scan bin with camera"
+              scannerHint={`Destination ${selected.destinationBinCode || selected.suggestedBinCode || ''}`.trim()}
               autoFocus
               value={scan}
-              onChange={(e) => setScan(e.target.value)}
+              onValueChange={setScan}
+              onSubmit={confirmBin}
+              submitOnScan
               placeholder="Scan or type bin code"
-              className="text-lg"
             />
             <div className="flex gap-2">
               <Button
-                className="flex-1"
-                onClick={() => scan && scanBin.mutate({ id: selected.id, barcode: scan })}
+                className="h-12 flex-1"
+                onClick={() => confirmBin(scan)}
                 disabled={!scan || scanBin.isPending}
               >
                 <CheckCircle2 className="h-4 w-4 mr-1" /> Confirm

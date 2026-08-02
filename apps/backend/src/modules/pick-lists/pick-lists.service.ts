@@ -192,8 +192,16 @@ export class PickListsService {
   }
 
   /**
-   * Mobile pick: scan a SKU/bin barcode to mark a pick list item picked.
-   * Walks the pick list items and finds one matching the SKU code (and optionally bin code).
+   * Mobile pick: scan a SKU label to mark a pick list item picked.
+   *
+   * Label encoding contract (see labels.service.ts): a SKU label encodes the
+   * SKU's `barcode` when it has one, else the SKU `code`. Both are therefore
+   * accepted here — barcode first, then code — so that:
+   *   - a label printed before a barcode was assigned still scans,
+   *   - a manufacturer's own printed EAN on the carton scans,
+   *   - and a generated EAN-13 scans.
+   * Bin labels encode the plain bin `code`, which is what `binBarcode` matches.
+   *
    * Increments quantity_picked by qty. Returns the matched item or a friendly error.
    */
   async scanItem(pickListId: string, payload: { barcode: string; binBarcode?: string; quantity?: number }) {
@@ -204,7 +212,7 @@ export class PickListsService {
 
     const candidates = await db.query(
       `SELECT pli.id, pli.sku_id, pli.bin_id, pli.quantity_required, pli.quantity_picked, pli.status,
-              s.code AS sku_code, b.code AS bin_code
+              s.code AS sku_code, s.barcode AS sku_barcode, b.code AS bin_code
          FROM pick_list_items pli
          LEFT JOIN skus s ON pli.sku_id = s.id
          LEFT JOIN bins b ON pli.bin_id = b.id
@@ -215,12 +223,21 @@ export class PickListsService {
 
     const upper = payload.barcode.trim().toUpperCase();
     const upperBin = payload.binBarcode?.trim().toUpperCase();
-    const match = candidates.rows.find((r: any) => {
-      const skuMatch = String(r.sku_code || '').toUpperCase() === upper;
-      if (!skuMatch) return false;
-      if (upperBin && String(r.bin_code || '').toUpperCase() !== upperBin) return false;
-      return (r.quantity_picked ?? 0) < (r.quantity_required ?? 0);
-    });
+
+    const pending = (r: any) => (r.quantity_picked ?? 0) < (r.quantity_required ?? 0);
+    const binOk = (r: any) => !upperBin || String(r.bin_code || '').toUpperCase() === upperBin;
+
+    // Barcode first: it is the more specific identifier and unique per tenant
+    // (migration 090), so it can never resolve to the wrong SKU. The code
+    // fallback covers labels printed before a barcode existed.
+    const match =
+      candidates.rows.find(
+        (r: any) =>
+          String(r.sku_barcode || '').toUpperCase() === upper && r.sku_barcode && binOk(r) && pending(r),
+      ) ??
+      candidates.rows.find(
+        (r: any) => String(r.sku_code || '').toUpperCase() === upper && binOk(r) && pending(r),
+      );
 
     if (!match) {
       throw new BadRequestException(

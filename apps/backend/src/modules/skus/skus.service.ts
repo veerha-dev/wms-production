@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { SkusRepository } from './skus.repository';
+import { SkuBarcodeService } from './sku-barcode.service';
 import { CreateSkuDto, UpdateSkuDto, QuerySkuDto, BulkCreateSkuDto, BulkUpdateSkuDto, BulkImportResultDto } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
 
@@ -8,7 +9,10 @@ import { getCurrentTenantId } from '../common/tenant.context';
 
 @Injectable()
 export class SkusService {
-  constructor(private repository: SkusRepository) {}
+  constructor(
+    private repository: SkusRepository,
+    private barcodes: SkuBarcodeService,
+  ) {}
 
 
   async findAll(query: QuerySkuDto) {
@@ -27,20 +31,97 @@ export class SkusService {
   }
 
   async create(dto: CreateSkuDto) {
+    const tenantId = getCurrentTenantId();
     let code = dto.code;
     if (!code) {
-      code = await this.repository.getNextCode(getCurrentTenantId());
+      code = await this.repository.getNextCode(tenantId);
     }
 
-    const existing = await this.repository.findByCode(getCurrentTenantId(), code);
+    const existing = await this.repository.findByCode(tenantId, code);
     if (existing) throw new ConflictException(`SKU code ${code} already exists`);
 
-    return this.repository.create(getCurrentTenantId(), { ...dto, code });
+    // `sku_barcode_source` decides whether an EAN-13 is minted here; see
+    // SkuBarcodeService.planForCreate.
+    const plan = await this.barcodes.planForCreate(dto.barcode);
+
+    // A generated barcode can still lose a race against a concurrent insert,
+    // so re-draw on the unique-index violation. A user-supplied one is a hard
+    // conflict — silently replacing what the operator typed would be worse.
+    if (plan.generate) {
+      return this.barcodes.withGeneratedBarcode(tenantId, (generated) =>
+        this.repository.create(tenantId, { ...dto, code, barcode: generated }),
+      );
+    }
+
+    try {
+      return await this.repository.create(tenantId, { ...dto, code, barcode: plan.barcode });
+    } catch (error) {
+      throw this.translateBarcodeCollision(error, plan.barcode);
+    }
   }
 
   async update(id: string, dto: UpdateSkuDto) {
     await this.findById(id);
-    return this.repository.update(getCurrentTenantId(), id, dto);
+    try {
+      return await this.repository.update(getCurrentTenantId(), id, dto);
+    } catch (error) {
+      throw this.translateBarcodeCollision(error, dto.barcode);
+    }
+  }
+
+  // ─── Barcodes ───────────────────────────────────────────────────────────────
+
+  /**
+   * Issues a fresh EAN-13 for one existing SKU, replacing whatever it had.
+   * Deliberate operator action, so it runs in every `sku_barcode_source` mode.
+   */
+  async generateBarcode(id: string) {
+    const tenantId = getCurrentTenantId();
+    await this.findById(id);
+
+    const updated = await this.barcodes.withGeneratedBarcode(tenantId, (barcode) =>
+      this.repository.setBarcode(tenantId, id, barcode),
+    );
+    if (!updated) throw new NotFoundException('SKU not found');
+    return updated;
+  }
+
+  /**
+   * Fills in a barcode for every SKU that has none — the "we just turned
+   * labelling on" button. SKUs that already carry a barcode (manufacturer or
+   * generated) are left alone.
+   */
+  async backfillBarcodes(): Promise<{ generated: number; skipped: number; failed: number }> {
+    const tenantId = getCurrentTenantId();
+    const ids = await this.repository.findIdsMissingBarcode(tenantId);
+
+    let generated = 0;
+    let failed = 0;
+
+    for (const id of ids) {
+      try {
+        const updated = await this.barcodes.withGeneratedBarcode(tenantId, (barcode) =>
+          this.repository.setBarcode(tenantId, id, barcode),
+        );
+        if (updated) generated++;
+        else failed++;
+      } catch {
+        // One bad row must not abort the whole backfill.
+        failed++;
+      }
+    }
+
+    return { generated, skipped: 0, failed };
+  }
+
+  /** Turns the unique-index violation from migration 090 into a 409. */
+  private translateBarcodeCollision(error: unknown, barcode?: string | null): unknown {
+    if (this.barcodes.isBarcodeCollision(error)) {
+      return new ConflictException(
+        `Barcode ${barcode ?? ''} is already assigned to another SKU in this tenant`.replace('  ', ' '),
+      );
+    }
+    return error;
   }
 
   async delete(id: string) {
@@ -79,7 +160,18 @@ export class SkusService {
           continue;
         }
 
-        await this.repository.create(getCurrentTenantId(), { ...item, code });
+        // Imported rows follow the same barcode policy as a single create —
+        // an Excel import is the most common way a catalog arrives without
+        // barcodes, so it is exactly where auto-generation has to work.
+        const tenantId = getCurrentTenantId();
+        const plan = await this.barcodes.planForCreate(item.barcode);
+        if (plan.generate) {
+          await this.barcodes.withGeneratedBarcode(tenantId, (generated) =>
+            this.repository.create(tenantId, { ...item, code, barcode: generated }),
+          );
+        } else {
+          await this.repository.create(tenantId, { ...item, code, barcode: plan.barcode });
+        }
         result.created++;
       } catch (error) {
         result.errors.push({

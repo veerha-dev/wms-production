@@ -44,6 +44,7 @@ import { useBinInventory } from '@/features/warehouse/hooks/useBinInventory';
 import { useMappingCompleteness } from '@/features/warehouse/hooks/useMappingCompleteness';
 import { ZoneConfig, RackConfig, BinConfig, AisleConfig, BulkRackGeneration, ZONE_COLORS, WarehouseMappingStats, BinStatus } from '@/shared/types/mapping';
 import { dbZoneTypeToUi, uiZoneTypeToDb } from '@/shared/lib/zoneTypeMapping';
+import { LabelPrintButton, type LabelBin } from '@/features/labels';
 
 export default function MappingPage() {
   const { currentUser, selectedWarehouse } = useWMS();
@@ -262,6 +263,42 @@ export default function MappingPage() {
       };
     });
   }, [dbBins, dbRacks, dbZones, binInventory]);
+
+  /**
+   * Bins flattened for the label printer.
+   *
+   * This page has already loaded every zone, rack, aisle and bin in the
+   * warehouse to draw the canvas, so the print dialog is handed that list
+   * rather than refetching it — and it is what the dialog scopes over when the
+   * `/api/v1/labels/bins` endpoint is not deployed.
+   *
+   * `code` is passed through untouched: it is what the label encodes and what
+   * the scan endpoint matches against.
+   */
+  const labelBins: LabelBin[] = useMemo(() => {
+    const zoneById = new Map(zones.map((z) => [z.id, z]));
+    const rackById = new Map(racks.map((r) => [r.id, r]));
+    const aisleById = new Map(aisleConfigs.map((a) => [a.id, a]));
+
+    return bins.map((bin) => {
+      const rack = rackById.get(bin.rackId);
+      const zone = zoneById.get(bin.zoneId);
+      const aisle = rack?.aisleId ? aisleById.get(rack.aisleId) : undefined;
+      return {
+        id: bin.id,
+        code: bin.code,
+        zoneName: zone?.name ?? null,
+        rackCode: rack?.code ?? null,
+        aisleCode: aisle?.code ?? null,
+        warehouseName: selectedWarehouse?.name ?? null,
+        level: bin.level,
+        position: bin.position,
+        warehouseId: bin.warehouseId || selectedWarehouse?.id || null,
+        zoneId: bin.zoneId || null,
+        rackId: bin.rackId || null,
+      };
+    });
+  }, [bins, zones, racks, aisleConfigs, selectedWarehouse]);
 
   // Calculate stats from real data with proper completeness
   const stats: WarehouseMappingStats = useMemo(() => ({
@@ -729,6 +766,14 @@ export default function MappingPage() {
               <Switch id="edit" checked={isEditMode} onCheckedChange={setIsEditMode} />
             </div>
           )}
+
+          <LabelPrintButton
+            kind="bin"
+            bins={labelBins}
+            initialSelectedIds={selectedBinId ? [selectedBinId] : []}
+            scopeHint={selectedWarehouse?.name}
+            disabled={labelBins.length === 0}
+          />
 
           <Button onClick={handleAddZone} disabled={!selectedWarehouse || createZoneMutation.isPending}>
             {createZoneMutation.isPending ? (

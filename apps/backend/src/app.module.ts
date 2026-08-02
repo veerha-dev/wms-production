@@ -47,6 +47,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { PackConsolidationModule } from './modules/pack-consolidation/pack-consolidation.module';
 import { PickWavesModule } from './modules/pick-waves/pick-waves.module';
 import { PresenceModule } from './modules/presence/presence.module';
+import { LabelsModule } from './modules/labels/labels.module';
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { PresenceModule } from './modules/presence/presence.module';
     PickWavesModule,
     PresenceModule,
     NotificationsModule,
+    LabelsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

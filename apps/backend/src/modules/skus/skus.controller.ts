@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { SkusService } from './skus.service';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateSkuDto, UpdateSkuDto, QuerySkuDto, BulkCreateSkuDto, BulkUpdateSkuDto } from './dto';
 
 @ApiTags('SKUs')
@@ -72,6 +73,34 @@ export class SkusController {
   async importSkus(@Body() dto: BulkCreateSkuDto) {
     const result = await this.service.bulkCreate(dto);
     return { success: true, data: result };
+  }
+
+  @Post('barcodes/backfill')
+  @Roles('admin')
+  @ApiOperation({
+    summary: 'Backfill missing SKU barcodes',
+    description:
+      'Issues an auto-generated EAN-13 for every SKU in the tenant that has no barcode. SKUs that already carry one are left untouched. Runs regardless of sku_barcode_source — it is an explicit admin action.',
+  })
+  @ApiResponse({ status: 201, description: 'Backfill completed. Returns how many barcodes were issued.' })
+  async backfillBarcodes() {
+    const data = await this.service.backfillBarcodes();
+    return { success: true, data };
+  }
+
+  @Post(':id/generate-barcode')
+  @Roles('admin', 'manager')
+  @ApiOperation({
+    summary: 'Generate a barcode for a SKU',
+    description:
+      'Issues a fresh auto-generated EAN-13 (GS1 internal prefix 20) for this SKU, replacing any existing value. Runs regardless of sku_barcode_source.',
+  })
+  @ApiParam({ name: 'id', type: 'string', description: 'SKU UUID' })
+  @ApiResponse({ status: 201, description: 'Barcode generated' })
+  @ApiResponse({ status: 404, description: 'SKU not found' })
+  async generateBarcode(@Param('id') id: string) {
+    const data = await this.service.generateBarcode(id);
+    return { success: true, data };
   }
 
   @Put('bulk-update')

@@ -121,6 +121,32 @@ export class SkusRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
+  // ─── Barcodes ───────────────────────────────────────────────────────────────
+
+  /**
+   * Writes a barcode straight onto one SKU. Kept separate from `update()` so
+   * the barcode-issuing paths never have to route a value through the generic
+   * whitelist, and so a unique violation surfaces from a single known column.
+   */
+  async setBarcode(tenantId: string, id: string, barcode: string) {
+    const result = await this.db.query(
+      'UPDATE skus SET barcode = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 RETURNING *',
+      [id, tenantId, barcode],
+    );
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null;
+  }
+
+  /** Ids of every SKU in the tenant that has no barcode yet, oldest first. */
+  async findIdsMissingBarcode(tenantId: string): Promise<string[]> {
+    const result = await this.db.query(
+      `SELECT id FROM skus
+        WHERE tenant_id = $1 AND (barcode IS NULL OR barcode = '')
+        ORDER BY created_at, id`,
+      [tenantId],
+    );
+    return result.rows.map((row: any) => row.id);
+  }
+
   private mapRow(row: any) {
     return {
       id: row.id,

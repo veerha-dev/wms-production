@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card } from '@/shared/components/ui/card';
@@ -6,9 +6,10 @@ import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { Badge } from '@/shared/components/ui/badge';
 import { Progress } from '@/shared/components/ui/progress';
-import { ArrowLeft, ListChecks, ScanLine, XCircle } from 'lucide-react';
+import { ArrowLeft, ListChecks, XCircle } from 'lucide-react';
 import { api } from '@/shared/lib/api';
 import { toast } from 'sonner';
+import { ScanField } from '../components/ScanField';
 
 interface PickList {
   id: string;
@@ -35,6 +36,7 @@ export default function MobilePickPage() {
   const [scan, setScan] = useState('');
   const [binScan, setBinScan] = useState('');
   const [qty, setQty] = useState('1');
+  const skuInputRef = useRef<HTMLInputElement>(null);
 
   const { data: lists = [], isLoading, refetch } = useQuery({
     queryKey: ['m-pick-lists'],
@@ -63,6 +65,20 @@ export default function MobilePickPage() {
     },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Scan failed'),
   });
+
+  /** Single submit path for the Record pick button and for a wedge Enter. */
+  const recordPick = useCallback(
+    (barcode: string) => {
+      // Sent exactly as decoded/typed — the backend owns barcode matching.
+      if (!barcode || scanItem.isPending) return;
+      scanItem.mutate({
+        barcode,
+        binBarcode: binScan || undefined,
+        quantity: parseInt(qty || '1', 10),
+      });
+    },
+    [binScan, qty, scanItem]
+  );
 
   if (selectedId && detail) {
     const total = detail.items.length;
@@ -100,17 +116,49 @@ export default function MobilePickPage() {
           )}
 
           <Card className="p-4 space-y-3">
-            <div className="text-sm font-medium flex items-center gap-1">
-              <ScanLine className="h-4 w-4" /> Scan SKU
-            </div>
-            <Input value={binScan} onChange={(e) => setBinScan(e.target.value)} placeholder="Bin code (optional)" />
-            <Input autoFocus value={scan} onChange={(e) => setScan(e.target.value)} placeholder="SKU code" />
+            {/*
+              No submitOnScan on either field here, unlike putaway. A pick posts
+              a *quantity* the camera cannot know, and an over- or under-pick
+              moves stock and has to be unwound by hand — so the decoded code
+              lands in the field and the worker checks the qty and taps.
+              A wedge Enter on the bin field advances to the SKU field rather
+              than submitting, which is the order those labels get scanned in.
+            */}
+            <ScanField
+              label="Bin code (optional)"
+              cameraLabel="Scan bin with camera"
+              scannerHint={next?.binCode ? `Pick from ${next.binCode}` : undefined}
+              value={binScan}
+              onValueChange={setBinScan}
+              onSubmit={() => skuInputRef.current?.focus()}
+              placeholder="Bin code (optional)"
+              showUnavailableHint={false}
+            />
+            <ScanField
+              label="Scan SKU"
+              cameraLabel="Scan SKU with camera"
+              scannerHint={next ? `${next.skuCode} · ${next.quantityPicked}/${next.quantityRequired}` : undefined}
+              autoFocus
+              inputRef={skuInputRef}
+              value={scan}
+              onValueChange={setScan}
+              onSubmit={recordPick}
+              placeholder="SKU code"
+            />
             <div className="flex gap-2">
-              <Input type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} className="w-20" />
+              <Input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                aria-label="Quantity picked"
+                className="h-12 w-20 text-lg"
+              />
               <Button
-                className="flex-1"
+                className="h-12 flex-1"
                 disabled={!scan || scanItem.isPending}
-                onClick={() => scanItem.mutate({ barcode: scan, binBarcode: binScan || undefined, quantity: parseInt(qty || '1', 10) })}
+                onClick={() => recordPick(scan)}
               >
                 Record pick
               </Button>

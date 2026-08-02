@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { SKUMaster as SKUType } from '@/shared/types/inventory';
 import {
@@ -74,6 +74,7 @@ import { toast } from 'sonner';
 import { ImportButton, ExportButton } from '@/shared/components/import-export';
 import { skuImportExportConfig } from '@/shared/config/import-export';
 import { useSKUs, useBulkCreateSKUs, useBulkUpdateSKUs } from '@/features/inventory/hooks/useSKUs';
+import { LabelPrintButton, type LabelSku } from '@/features/labels';
 
 const categories = ['Food & Grocery', 'Electronics', 'Kitchenware', 'Cleaning', 'Textiles', 'Auto Parts', 'Pharma', 'Industrial'];
 
@@ -168,6 +169,28 @@ export function SKUMaster() {
     const matchesStatus = statusFilter === 'all' || sku.status === statusFilter;
     return matchesSearch && matchesCategory && matchesStatus;
   });
+
+  /**
+   * SKUs handed to the label printer.
+   *
+   * The current filter is what gets passed, so "print what I am looking at"
+   * needs no extra state; ticking rows narrows it further via
+   * `initialSelectedIds`. `barcode` is passed through as-is — a null one is not
+   * papered over here, because the dialog has to flag those SKUs as falling
+   * back to encoding their code.
+   */
+  const labelSkus: LabelSku[] = useMemo(
+    () =>
+      filteredSKUs.map((sku) => ({
+        id: sku.id,
+        code: sku.code,
+        name: sku.name,
+        barcode: sku.barcode ?? null,
+        uom: sku.uom ?? sku.unit ?? null,
+        category: sku.category,
+      })),
+    [filteredSKUs]
+  );
 
   const handleSelectAll = () => {
     if (selectedSKUs.length === filteredSKUs.length) {
@@ -423,9 +446,17 @@ export function SKUMaster() {
               data={filteredSKUs as Record<string, unknown>[]}
               size="sm"
             />
-            <Button 
-              size="sm" 
-              className="gap-2" 
+            <LabelPrintButton
+              kind="sku"
+              skus={labelSkus}
+              initialSelectedIds={selectedSKUs}
+              scopeHint={categoryFilter === 'All' ? undefined : categoryFilter}
+              size="sm"
+              disabled={labelSkus.length === 0}
+            />
+            <Button
+              size="sm"
+              className="gap-2"
               disabled={!canCreateSKU}
               onClick={() => {
                 resetForm();

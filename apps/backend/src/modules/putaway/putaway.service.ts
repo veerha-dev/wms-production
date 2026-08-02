@@ -132,9 +132,14 @@ export class PutawayService {
   }
 
   /**
-   * Mobile worker scans a bin barcode to confirm the destination. Validates the scanned bin
+   * Mobile worker scans a bin label to confirm the destination. Validates the scanned bin
    * matches the task's destination (or suggested) and advances status to 'in_progress' if not yet.
    * Returns a friendly error if the wrong bin is scanned so the worker doesn't dump stock in the wrong place.
+   *
+   * Label encoding contract (see labels.service.ts): a location label encodes
+   * the plain bin `code` and nothing else — `barcode_settings.location_code_type`
+   * picks QR vs 1D symbology, not the payload. Comparison is case-insensitive
+   * and trimmed. Unchanged on purpose: labels already stuck to racks must keep working.
    */
   async scanBin(taskId: string, barcode: string) {
     const task = await this.findOne(taskId);

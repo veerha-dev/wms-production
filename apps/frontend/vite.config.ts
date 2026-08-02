@@ -63,6 +63,11 @@ const VENDOR_CHUNKS: Array<readonly [string, readonly string[]]> = [
   ],
   ["charts", ["recharts"]],
   ["query", ["@tanstack/react-query"]],
+  // Symbol generators for the label printer. Only the lazily-loaded
+  // <LabelPrintDialog> reaches them, and pinning them together keeps the pair
+  // in one chunk that is fetched the first time someone opens that dialog
+  // rather than smeared across the route chunks that host a print button.
+  ["labels", ["qrcode", "jsbarcode"]],
 ];
 
 function manualChunks(id: string): string | undefined {
@@ -80,10 +85,11 @@ function manualChunks(id: string): string | undefined {
 /**
  * Libraries that must never end up in the boot payload. Each is only used by a
  * lazy desktop route (charts on reports/analytics, PDF on invoices and POs,
- * xlsx in the import/export dialogs), and together they are the bulk of what
- * made the old precache 3.5 MiB.
+ * xlsx in the import/export dialogs, the QR/barcode generators in the label
+ * print dialog), and together they are the bulk of what made the old precache
+ * 3.5 MiB.
  */
-const LAZY_ONLY_PACKAGES = ["recharts", "jspdf", "xlsx", "html2canvas"];
+const LAZY_ONLY_PACKAGES = ["recharts", "jspdf", "xlsx", "html2canvas", "qrcode", "jsbarcode"];
 
 /**
  * Files the browser loads before the app can paint: the HTML entry chunk plus
