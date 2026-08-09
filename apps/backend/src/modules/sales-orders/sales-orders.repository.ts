@@ -26,6 +26,10 @@ export class SalesOrdersRepository {
       customerState: row.customer_state ?? null,
       billingAddress: row.billing_address ?? null,
       paymentTerms: row.payment_terms ?? null,
+      // Promised delivery date (migration 091). Nullable — no date was agreed.
+      priority: row.priority ?? 'medium',
+      expectedDeliveryDate: row.expected_delivery_date ?? null,
+      expected_delivery_date: row.expected_delivery_date ?? null,
       totalAmount: row.total_amount ? parseFloat(row.total_amount) : 0,
       total_value: row.total_amount ? parseFloat(row.total_amount) : 0,
       notes: row.notes,
@@ -120,6 +124,10 @@ export class SalesOrdersRepository {
       const shippingAddress = dto.shippingAddress || dto.shipping_address || dto.customer_address || null;
       const shippingAddressId = dto.shippingAddressId || dto.shipping_address_id || null;
       const notes = dto.notes || null;
+      // Empty string from an untouched date input must become NULL, not '' —
+      // Postgres rejects '' for a DATE column.
+      const expectedDeliveryDate =
+        dto.expectedDeliveryDate || dto.expected_delivery_date || null;
 
       // Denormalized customer snapshot (see 084_create_customer_addresses.sql).
       // Populated by the service from the customers record at order time; NULL
@@ -129,8 +137,8 @@ export class SalesOrdersRepository {
            tenant_id, so_number, customer_id, warehouse_id, status, shipping_address,
            shipping_address_id, total_amount, notes,
            customer_name, customer_code, customer_gstin, customer_phone, customer_email,
-           customer_state, billing_address, payment_terms
-         ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+           customer_state, billing_address, payment_terms, expected_delivery_date, priority
+         ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
          RETURNING *`,
         [
           tenantId, soNumber, customerId, warehouseId, shippingAddress,
@@ -143,6 +151,8 @@ export class SalesOrdersRepository {
           dto.customerState ?? null,
           dto.billingAddress ?? null,
           dto.paymentTerms ?? null,
+          expectedDeliveryDate,
+          dto.priority || 'medium',
         ],
       );
       const so = soRes.rows[0];
@@ -178,10 +188,21 @@ export class SalesOrdersRepository {
       shippingAddress: 'shipping_address', shipping_address: 'shipping_address',
       shippingAddressId: 'shipping_address_id', shipping_address_id: 'shipping_address_id',
       totalAmount: 'total_amount', total_amount: 'total_amount',
+      expectedDeliveryDate: 'expected_delivery_date', expected_delivery_date: 'expected_delivery_date',
+      priority: 'priority',
       notes: 'notes',
     };
+    const assigned = new Set<string>();
     for (const [key, col] of Object.entries(fieldMap)) {
-      if (dto[key] !== undefined) { updates.push(`${col} = $${idx}`); params.push(dto[key]); idx++; }
+      if (dto[key] === undefined) continue;
+      // Both the camelCase and snake_case aliases map to the same column; a
+      // payload carrying both would otherwise produce "multiple assignments to
+      // same column". First alias wins.
+      if (assigned.has(col)) continue;
+      assigned.add(col);
+      // '' from a cleared date input means "no date", not an invalid DATE.
+      const value = col === 'expected_delivery_date' && dto[key] === '' ? null : dto[key];
+      updates.push(`${col} = $${idx}`); params.push(value); idx++;
     }
     if (updates.length === 0) return this.findById(id, tenantId);
     updates.push('updated_at = NOW()');

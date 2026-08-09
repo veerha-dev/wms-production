@@ -7,12 +7,15 @@ export function useManagerDashboard(warehouseId: string | undefined | null) {
   return useQuery({
     queryKey: ['manager-dashboard', warehouseId],
     queryFn: async () => {
+      // The server falls back to the warehouse on the caller's JWT, so an
+      // absent id is fine — send no param at all rather than `warehouseId=`,
+      // which would arrive as an empty string.
       const { data } = await api.get('/api/v1/dashboard/manager-stats', {
-        params: { warehouseId },
+        params: warehouseId ? { warehouseId } : undefined,
       });
       return data.data;
     },
-    enabled: isAuthenticated && !!warehouseId,
+    enabled: isAuthenticated,
     refetchInterval: 30000,
   });
 }

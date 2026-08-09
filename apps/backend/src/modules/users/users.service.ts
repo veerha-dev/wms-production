@@ -2,10 +2,12 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import * as bcrypt from 'bcrypt';
 import { UsersRepository } from './users.repository';
 import { DatabaseService } from '../../database/database.service';
-import { CreateUserDto, UpdateUserDto, QueryUserDto } from './dto';
+import { CreateUserDto, UpdateUserDto, QueryUserDto, RolePermissionDto } from './dto';
 import { getCurrentTenantId } from '../common/tenant.context';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PermissionsService } from '../auth/permissions.service';
+import { PERMISSION_ROLES } from '../auth/permissions.constants';
 
 export interface BulkInviteResult {
   invited: number;
@@ -21,6 +23,7 @@ export class UsersService {
     private db: DatabaseService,
     private email: EmailService,
     private readonly notifications: NotificationsService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async findAll(query: QueryUserDto) {
@@ -317,19 +320,35 @@ export class UsersService {
     return permissions;
   }
 
-  async updatePermissions(permissions: any[]) {
-    for (const perm of permissions) {
-      for (const role of ['admin', 'manager', 'worker']) {
-        const allowed = perm[role] ?? false;
-        await this.db.query(
-          `INSERT INTO role_permissions (tenant_id, role, module, action, allowed, updated_at)
-           VALUES ($1, $2, $3, $4, $5, NOW())
-           ON CONFLICT (tenant_id, role, module, action)
-           DO UPDATE SET allowed = $5, updated_at = NOW()`,
-          [getCurrentTenantId(), role, perm.module, perm.action, allowed],
-        );
+  /**
+   * Writes the matrix back. The payload is validated by UpdatePermissionsDto,
+   * so module/action are known values rather than whatever the caller sent.
+   *
+   * The write is transactional (110 rows x 3 roles = 330 upserts — a partial
+   * failure used to leave the matrix half-applied) and, once committed,
+   * invalidates this tenant's cached matrix so PermissionsGuard picks the new
+   * values up on the very next request instead of after the TTL.
+   */
+  async updatePermissions(permissions: RolePermissionDto[]) {
+    const tenantId = getCurrentTenantId();
+
+    await this.db.transaction(async (client) => {
+      for (const perm of permissions) {
+        for (const role of PERMISSION_ROLES) {
+          const allowed = perm[role] ?? false;
+          await client.query(
+            `INSERT INTO role_permissions (tenant_id, role, module, action, allowed, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (tenant_id, role, module, action)
+             DO UPDATE SET allowed = $5, updated_at = NOW()`,
+            [tenantId, role, perm.module, perm.action, allowed],
+          );
+        }
       }
-    }
+    });
+
+    this.permissions.invalidate(tenantId);
+
     return this.getPermissions();
   }
 }

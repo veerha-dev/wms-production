@@ -25,7 +25,12 @@ export class DashboardService {
       dueTodayRes,
     ] = await Promise.all([
       this.db.query(`SELECT id, name, type, total_capacity, current_occupancy, city FROM warehouses WHERE id = $1`, [warehouseId]),
-      this.db.query(`SELECT COUNT(*) as c FROM sales_orders WHERE warehouse_id = $1 AND tenant_id = $2 AND status IN ('confirmed','picking','packing') AND DATE(expected_delivery_date) <= CURRENT_DATE`, [warehouseId, tid]),
+      // expected_delivery_date is nullable (see migration 091): an order with no
+      // promised date has nothing to ship "today", so NULL must not be counted.
+      // `col <= CURRENT_DATE` already yields NULL (not true) for such rows, but
+      // the IS NOT NULL is kept explicit so the intent survives future edits and
+      // so the index on (tenant_id, warehouse_id, expected_delivery_date) is used.
+      this.db.query(`SELECT COUNT(*) as c FROM sales_orders WHERE warehouse_id = $1 AND tenant_id = $2 AND status IN ('confirmed','picking','packing') AND expected_delivery_date IS NOT NULL AND expected_delivery_date <= CURRENT_DATE`, [warehouseId, tid]),
       this.db.query(`SELECT COUNT(*) as c FROM grn WHERE warehouse_id = $1 AND tenant_id = $2 AND status = 'pending'`, [warehouseId, tid]),
       this.db.query(`SELECT COUNT(*) as c FROM users WHERE warehouse_id = $1 AND tenant_id = $2 AND is_active = true`, [warehouseId, tid]),
       this.db.query(`SELECT COUNT(*) as c FROM tasks WHERE warehouse_id = $1 AND tenant_id = $2 AND status NOT IN ('completed','cancelled')`, [warehouseId, tid]),
@@ -57,7 +62,9 @@ export class DashboardService {
         ORDER BY sh.created_at DESC LIMIT 10`, [warehouseId, tid]),
       this.db.query(`SELECT id, movement_number, movement_type, quantity, created_at
         FROM stock_movements WHERE warehouse_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 15`, [warehouseId, tid]),
-      // Due Today — count of SOs per stage that must dispatch today (manager-specific)
+      // Due Today — count of SOs per stage that must dispatch today (manager-specific).
+      // Orders with no promised delivery date (NULL) are excluded: nothing was
+      // agreed with the customer, so they cannot be "due" on any given day.
       this.db.query(`SELECT
         COUNT(*) FILTER (WHERE status = 'confirmed') as confirmed_due,
         COUNT(*) FILTER (WHERE status = 'picking') as picking_due,
@@ -66,7 +73,8 @@ export class DashboardService {
         COUNT(*) as total_due
         FROM sales_orders
         WHERE warehouse_id = $1 AND tenant_id = $2
-          AND DATE(expected_delivery_date) = CURRENT_DATE
+          AND expected_delivery_date IS NOT NULL
+          AND expected_delivery_date = CURRENT_DATE
           AND status NOT IN ('delivered','cancelled')`, [warehouseId, tid]),
     ]);
 

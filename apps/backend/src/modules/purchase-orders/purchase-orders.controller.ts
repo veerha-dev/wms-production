@@ -13,6 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import {
   CreatePurchaseOrderDto,
@@ -20,8 +21,14 @@ import {
   QueryPurchaseOrderDto,
 } from './dto';
 
+/**
+ * Gated on the "Purchase Orders" module of the Permissions Matrix.
+ * submit/recall/cancel are lifecycle edits; approve/reject are the approval
+ * authority itself and map to 'manage'.
+ */
 @Controller('api/v1/purchase-orders')
 @UseGuards(JwtAuthGuard)
+@RequirePermission('Purchase Orders', 'view')
 export class PurchaseOrdersController {
   constructor(
     private readonly purchaseOrdersService: PurchaseOrdersService,
@@ -50,12 +57,14 @@ export class PurchaseOrdersController {
   }
 
   @Post()
+  @RequirePermission('Purchase Orders', 'create')
   async create(@Body() dto: CreatePurchaseOrderDto, @Req() req: any) {
     const data = await this.purchaseOrdersService.create(dto, req.user);
     return { success: true, data };
   }
 
   @Put(':id')
+  @RequirePermission('Purchase Orders', 'edit')
   async update(
     @Param('id') id: string,
     @Body() dto: UpdatePurchaseOrderDto,
@@ -65,12 +74,14 @@ export class PurchaseOrdersController {
   }
 
   @Delete(':id')
+  @RequirePermission('Purchase Orders', 'delete')
   async delete(@Param('id') id: string) {
     const data = await this.purchaseOrdersService.delete(id);
     return { success: true, data };
   }
 
   @Post(':id/submit')
+  @RequirePermission('Purchase Orders', 'edit')
   @HttpCode(HttpStatus.OK)
   async submit(@Param('id') id: string, @Req() req: any) {
     const data = await this.purchaseOrdersService.submit(id, req.user);
@@ -78,6 +89,7 @@ export class PurchaseOrdersController {
   }
 
   @Post(':id/approve')
+  @RequirePermission('Purchase Orders', 'manage')
   @HttpCode(HttpStatus.OK)
   async approve(@Param('id') id: string, @Req() req: any) {
     const data = await this.purchaseOrdersService.approve(id, req.user);
@@ -85,6 +97,7 @@ export class PurchaseOrdersController {
   }
 
   @Post(':id/reject')
+  @RequirePermission('Purchase Orders', 'manage')
   @HttpCode(HttpStatus.OK)
   async reject(
     @Param('id') id: string,
@@ -96,6 +109,7 @@ export class PurchaseOrdersController {
   }
 
   @Post(':id/recall')
+  @RequirePermission('Purchase Orders', 'edit')
   @HttpCode(HttpStatus.OK)
   async recall(@Param('id') id: string, @Req() req: any) {
     const data = await this.purchaseOrdersService.recall(id, req.user);
@@ -103,6 +117,7 @@ export class PurchaseOrdersController {
   }
 
   @Post(':id/cancel')
+  @RequirePermission('Purchase Orders', 'edit')
   @HttpCode(HttpStatus.OK)
   async cancel(@Param('id') id: string) {
     const data = await this.purchaseOrdersService.cancel(id);

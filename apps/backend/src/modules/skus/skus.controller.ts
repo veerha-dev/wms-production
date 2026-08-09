@@ -2,11 +2,18 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { SkusService } from './skus.service';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { CreateSkuDto, UpdateSkuDto, QuerySkuDto, BulkCreateSkuDto, BulkUpdateSkuDto } from './dto';
 
+/**
+ * The product catalogue lives under the Inventory screen, so it is gated on
+ * the "Inventory" module of the Permissions Matrix — the same name the
+ * frontend uses for /inventory. There is no separate "SKUs" module.
+ */
 @ApiTags('SKUs')
 @Controller('api/v1/skus')
 @ApiBearerAuth('JWT-auth')
+@RequirePermission('Inventory', 'view')
 export class SkusController {
   constructor(private service: SkusService) {}
 
@@ -41,6 +48,7 @@ export class SkusController {
   }
 
   @Post()
+  @RequirePermission('Inventory', 'create')
   @ApiOperation({ 
     summary: 'Create new SKU',
     description: 'Create a new product SKU in the catalog'
@@ -54,6 +62,7 @@ export class SkusController {
   }
 
   @Post('bulk')
+  @RequirePermission('Inventory', 'create')
   @ApiOperation({
     summary: 'Bulk create SKUs',
     description: 'Create multiple SKUs in a single operation. Useful for importing product catalogs.'
@@ -66,6 +75,7 @@ export class SkusController {
   }
 
   @Post('import')
+  @RequirePermission('Inventory', 'create')
   @ApiOperation({
     summary: 'Import SKUs from parsed CSV/XLSX',
     description: 'Onboarding endpoint — accepts a JSON array of SKU rows (parsed client-side from CSV/XLSX). Returns per-row error report.',
@@ -90,6 +100,7 @@ export class SkusController {
 
   @Post(':id/generate-barcode')
   @Roles('admin', 'manager')
+  @RequirePermission('Inventory', 'edit')
   @ApiOperation({
     summary: 'Generate a barcode for a SKU',
     description:
@@ -104,6 +115,7 @@ export class SkusController {
   }
 
   @Put('bulk-update')
+  @RequirePermission('Inventory', 'edit')
   @ApiOperation({ 
     summary: 'Bulk update SKUs',
     description: 'Update multiple existing SKUs in a single operation. Requires SKU IDs.'
@@ -117,6 +129,7 @@ export class SkusController {
   }
 
   @Put(':id')
+  @RequirePermission('Inventory', 'edit')
   @ApiOperation({ 
     summary: 'Update SKU',
     description: 'Update an existing SKU with new information'
@@ -131,6 +144,7 @@ export class SkusController {
   }
 
   @Delete(':id')
+  @RequirePermission('Inventory', 'delete')
   @ApiOperation({ 
     summary: 'Delete SKU',
     description: 'Soft delete a SKU from the catalog. SKU must not have active inventory.'

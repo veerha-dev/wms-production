@@ -8,11 +8,14 @@ import { AuthRepository } from './auth.repository';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { PermissionsGuard } from './guards/permissions.guard';
+import { PermissionsModule } from './permissions.module';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}),
+    PermissionsModule,
   ],
   controllers: [AuthController],
   providers: [
@@ -20,9 +23,12 @@ import { RolesGuard } from './guards/roles.guard';
     AuthRepository,
     JwtStrategy,
     // Global guards. Order matters: JwtAuthGuard must run before RolesGuard
-    // so that req.user is populated when roles are checked.
+    // so that req.user is populated when roles are checked. PermissionsGuard
+    // runs last — it only acts on routes carrying @RequirePermission, and by
+    // then the coarse @Roles gate has already had its say.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
   exports: [AuthService],
 })

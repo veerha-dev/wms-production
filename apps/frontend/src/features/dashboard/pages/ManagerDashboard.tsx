@@ -17,13 +17,31 @@ export default function ManagerDashboard() {
   const { user } = useAuth();
   const { selectedWarehouse } = useWMS();
   const warehouseId = user?.warehouseId || selectedWarehouse?.id;
-  const { data, isLoading } = useManagerDashboard(warehouseId);
+  const { data, isLoading, isError, error, refetch } = useManagerDashboard(warehouseId);
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <AppLayout title="Dashboard" breadcrumbs={[{ label: 'Dashboard' }]}>
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // A failed request used to fall through to the spinner branch (isLoading
+  // false, data undefined), so a 500 was indistinguishable from "still
+  // loading" — the dashboard simply span forever. Show the failure instead.
+  if (isError || !data) {
+    const message =
+      (error as any)?.response?.data?.message || (error as any)?.message || 'Unknown error';
+    return (
+      <AppLayout title="Dashboard" breadcrumbs={[{ label: 'Dashboard' }]}>
+        <div className="flex flex-col items-center justify-center h-[60vh] gap-3 text-center">
+          <AlertTriangle className="h-8 w-8 text-destructive" />
+          <p className="font-medium">Could not load the dashboard</p>
+          <p className="text-sm text-muted-foreground max-w-md">{message}</p>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
         </div>
       </AppLayout>
     );

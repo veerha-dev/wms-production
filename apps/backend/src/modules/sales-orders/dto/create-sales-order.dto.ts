@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID, IsArray, IsNumber, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsArray, IsNumber, IsDateString, ValidateNested , IsIn} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class SalesOrderItemDto {
@@ -22,8 +22,9 @@ export class CreateSalesOrderDto {
   @IsOptional() @IsUUID() customerId?: string;
   @IsOptional() @IsUUID() warehouse_id?: string;
   @IsOptional() @IsUUID() warehouseId?: string;
-  @IsOptional() @IsString() expected_delivery_date?: string;
-  @IsOptional() @IsString() expectedDeliveryDate?: string;
+  /** Promised delivery date, ISO (YYYY-MM-DD). Optional — NULL means no date agreed. */
+  @IsOptional() @IsDateString() expected_delivery_date?: string;
+  @IsOptional() @IsDateString() expectedDeliveryDate?: string;
   @IsOptional() @IsString() shipping_address?: string;
   @IsOptional() @IsString() shippingAddress?: string;
   /** Saved customer_addresses row; omit for a one-off typed address. */
@@ -31,7 +32,8 @@ export class CreateSalesOrderDto {
   @IsOptional() @IsUUID() shippingAddressId?: string;
   @IsOptional() @IsString() payment_terms?: string;
   @IsOptional() @IsString() paymentTerms?: string;
-  @IsOptional() @IsString() priority?: string;
+  /** low | medium | high | urgent — see migration 092. */
+  @IsOptional() @IsIn(['low', 'medium', 'high', 'urgent']) priority?: string;
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SalesOrderItemDto)
   items?: SalesOrderItemDto[];

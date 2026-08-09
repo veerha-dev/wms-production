@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import {
   CreateCustomerDto,
   UpdateCustomerDto,
@@ -31,9 +32,16 @@ import {
  * @Roles keeps reads to admin + manager. Method-level @Roles overrides it
  * (RolesGuard reads handler metadata first), which is how DELETE and the
  * status change stay admin-only.
+ *
+ * On top of that, @RequirePermission makes the tenant's Permissions Matrix
+ * (Users -> Permissions) actually bind: the class-level 'view' covers every
+ * read, and the write routes name their own action. Address sub-resources are
+ * treated as 'edit' of the parent customer rather than create/delete of their
+ * own, so toggling Customers/delete off does not also strip address upkeep.
  */
 @Controller('api/v1/customers')
 @Roles('admin', 'manager')
+@RequirePermission('Customers', 'view')
 export class CustomersController {
   constructor(private readonly service: CustomersService) {}
 
@@ -60,6 +68,7 @@ export class CustomersController {
 
   @Post('import')
   @Roles('admin', 'manager')
+  @RequirePermission('Customers', 'create')
   @HttpCode(HttpStatus.OK)
   async importCustomers(@Body() dto: ImportCustomersDto, @Req() req: any) {
     const result = await this.service.importCustomers(dto, req.user);
@@ -74,6 +83,7 @@ export class CustomersController {
 
   @Post()
   @Roles('admin', 'manager')
+  @RequirePermission('Customers', 'create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreateCustomerDto, @Req() req: any) {
     return { success: true, data: await this.service.create(dto, req.user) };
@@ -90,6 +100,7 @@ export class CustomersController {
 
   @Post(':id/addresses')
   @Roles('admin', 'manager')
+  @RequirePermission('Customers', 'edit')
   @HttpCode(HttpStatus.CREATED)
   async createAddress(@Param('id') id: string, @Body() dto: CustomerAddressDto) {
     return { success: true, data: await this.service.createAddress(id, dto) };
@@ -97,6 +108,7 @@ export class CustomersController {
 
   @Put(':id/addresses/:addressId')
   @Roles('admin', 'manager')
+  @RequirePermission('Customers', 'edit')
   async updateAddress(
     @Param('id') id: string,
     @Param('addressId') addressId: string,
@@ -107,6 +119,7 @@ export class CustomersController {
 
   @Delete(':id/addresses/:addressId')
   @Roles('admin', 'manager')
+  @RequirePermission('Customers', 'edit')
   async removeAddress(@Param('id') id: string, @Param('addressId') addressId: string) {
     return { success: true, data: await this.service.removeAddress(id, addressId) };
   }
@@ -136,12 +149,14 @@ export class CustomersController {
 
   @Put(':id')
   @Roles('admin', 'manager')
+  @RequirePermission('Customers', 'edit')
   async update(@Param('id') id: string, @Body() dto: UpdateCustomerDto, @Req() req: any) {
     return { success: true, data: await this.service.update(id, dto, req.user) };
   }
 
   @Patch(':id/status')
   @Roles('admin')
+  @RequirePermission('Customers', 'edit')
   async updateStatus(@Param('id') id: string, @Body('status') status: string, @Req() req: any) {
     return { success: true, data: await this.service.updateStatus(id, status, req.user) };
   }
@@ -152,6 +167,7 @@ export class CustomersController {
    */
   @Delete(':id')
   @Roles('admin')
+  @RequirePermission('Customers', 'delete')
   async remove(@Param('id') id: string, @Req() req: any) {
     return { success: true, data: await this.service.remove(id, req.user) };
   }
