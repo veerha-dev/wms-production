@@ -154,7 +154,33 @@ export class PickListsService {
 
   async updateStatus(id: string, status: string, extraFields?: Record<string, any>) {
     await this.findOne(id);
-    return this.repository.updateStatus(id, getCurrentTenantId(), status, extraFields);
+    const tenantId = getCurrentTenantId();
+    const updated = await this.repository.updateStatus(id, tenantId, status, extraFields);
+    if (status === 'in_progress') {
+      await this.markOrdersPicking(tenantId, id);
+    }
+    return updated;
+  }
+
+  /**
+   * Reflects "picking has started" onto the orders themselves. The dashboard has
+   * always counted orders in a `picking` bucket; until now nothing ever wrote
+   * that status, so the tile read zero no matter how much picking was underway.
+   */
+  private async markOrdersPicking(tenantId: string, pickListId: string): Promise<void> {
+    const db = (this.repository as any).db;
+    await db.query(
+      `UPDATE sales_orders
+          SET status = 'picking', updated_at = NOW()
+        WHERE tenant_id = $1
+          AND status IN ('confirmed', 'approved')
+          AND id IN (
+            SELECT pli.so_id FROM pick_list_items pli WHERE pli.pick_list_id = $2 AND pli.so_id IS NOT NULL
+            UNION
+            SELECT pl.so_id FROM pick_lists pl WHERE pl.id = $2 AND pl.so_id IS NOT NULL
+          )`,
+      [tenantId, pickListId],
+    );
   }
 
   /**
@@ -170,6 +196,8 @@ export class PickListsService {
     const updated = await this.repository.updateStatus(id, tenantId, 'completed', {
       completedAt: new Date(),
     });
+
+    await this.advanceOrdersToPicked(tenantId, id);
 
     void this.notifications
       .emit('pick_list.completed', {
@@ -189,6 +217,54 @@ export class PickListsService {
       .catch(() => undefined);
 
     return updated;
+  }
+
+  /**
+   * Moves every order this pick list served to `picked` — but only once nothing
+   * is still being picked for that order.
+   *
+   * This is the handover to packing: `picked` is what puts an order on the
+   * packing queue. A batch pick serves several orders and an order can be split
+   * across several pick lists (zone picking), so the check is per order, not per
+   * pick list, and an order with a sibling list still open stays where it is.
+   *
+   * Orders already past picking are left alone so a late-completing list cannot
+   * drag a packed order backwards.
+   */
+  private async advanceOrdersToPicked(tenantId: string, pickListId: string): Promise<void> {
+    const db = (this.repository as any).db;
+
+    const ordersRes = await db.query(
+      `SELECT DISTINCT so_id FROM (
+         SELECT pli.so_id FROM pick_list_items pli WHERE pli.pick_list_id = $1 AND pli.so_id IS NOT NULL
+         UNION
+         SELECT pl.so_id FROM pick_lists pl WHERE pl.id = $1 AND pl.so_id IS NOT NULL
+       ) s WHERE so_id IS NOT NULL`,
+      [pickListId],
+    );
+
+    for (const row of ordersRes.rows) {
+      const soId = row.so_id;
+      const openRes = await db.query(
+        `SELECT COUNT(*)::int AS open_count
+           FROM pick_lists pl
+          WHERE pl.tenant_id = $1
+            AND pl.status NOT IN ('completed', 'cancelled')
+            AND (pl.so_id = $2 OR EXISTS (
+                  SELECT 1 FROM pick_list_items pli
+                   WHERE pli.pick_list_id = pl.id AND pli.so_id = $2))`,
+        [tenantId, soId],
+      );
+      if ((openRes.rows[0]?.open_count ?? 0) > 0) continue;
+
+      await db.query(
+        `UPDATE sales_orders
+            SET status = 'picked', updated_at = NOW()
+          WHERE id = $1 AND tenant_id = $2
+            AND status IN ('confirmed', 'approved', 'picking')`,
+        [soId, tenantId],
+      );
+    }
   }
 
   /**
@@ -262,6 +338,7 @@ export class PickListsService {
         WHERE id = $1 AND tenant_id = $2 AND status IN ('pending', 'assigned')`,
       [pickListId, tid],
     );
+    await this.markOrdersPicking(tid, pickListId);
 
     return {
       ok: true,

@@ -35,8 +35,27 @@ export class ShipmentsService {
   }
 
   async create(dto: any) {
+    const tenantId = getCurrentTenantId();
     const shipmentNumber = dto.shipmentNumber || await this.generateCode();
-    const { code, ...rest } = dto; return this.repository.create(getCurrentTenantId(), { ...rest, shipmentNumber });
+    const { code, ...rest } = dto;
+
+    // Inherit whatever packing already measured — only for fields the dispatcher
+    // left blank, so an explicit entry on the form always wins.
+    const soId = rest.soId || rest.so_id || rest.order_id || null;
+    if (soId) {
+      const packed = await this.repository.findPackingTotals(tenantId, soId);
+      if (packed) {
+        if (rest.weight === undefined || rest.weight === null || rest.weight === '') {
+          rest.weight = packed.weightKg;
+        }
+        if (!rest.carrier && packed.carrier) rest.carrier = packed.carrier;
+        if (!rest.trackingNumber && !rest.tracking_number && packed.trackingNumber) {
+          rest.trackingNumber = packed.trackingNumber;
+        }
+      }
+    }
+
+    return this.repository.create(tenantId, { ...rest, shipmentNumber });
   }
 
   async update(id: string, dto: any) {

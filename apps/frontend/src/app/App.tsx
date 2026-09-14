@@ -34,6 +34,7 @@ import ForcePasswordChangePage from "@/features/auth/pages/ForcePasswordChangePa
 import MobileHomePage from "@/features/mobile/pages/MobileHomePage";
 import MobilePutawayPage from "@/features/mobile/pages/MobilePutawayPage";
 import MobilePickPage from "@/features/mobile/pages/MobilePickPage";
+import MobilePackPage from "@/features/mobile/pages/MobilePackPage";
 
 /**
  * ─── LAZY ROUTES ────────────────────────────────────────────────────────────
@@ -211,6 +212,7 @@ const App = () => (
             <Route path="/m" element={<ProtectedRoute><MobileHomePage /></ProtectedRoute>} />
             <Route path="/m/putaway" element={<ProtectedRoute><MobilePutawayPage /></ProtectedRoute>} />
             <Route path="/m/pick" element={<ProtectedRoute><MobilePickPage /></ProtectedRoute>} />
+            <Route path="/m/pack" element={<ProtectedRoute><MobilePackPage /></ProtectedRoute>} />
             
             <Route path="/admin/modules" element={<ProtectedLayout><ModuleManagementPage /></ProtectedLayout>} />
             

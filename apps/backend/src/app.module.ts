@@ -45,6 +45,7 @@ import { EmailModule } from './modules/email/email.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { PackConsolidationModule } from './modules/pack-consolidation/pack-consolidation.module';
+import { PackingModule } from './modules/packing/packing.module';
 import { PickWavesModule } from './modules/pick-waves/pick-waves.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { LabelsModule } from './modules/labels/labels.module';
@@ -96,6 +97,7 @@ import { LabelsModule } from './modules/labels/labels.module';
     OnboardingModule,
     AuditModule,
     PackConsolidationModule,
+    PackingModule,
     PickWavesModule,
     PresenceModule,
     NotificationsModule,

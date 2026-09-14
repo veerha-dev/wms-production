@@ -102,6 +102,41 @@ export class ShipmentsRepository {
     return this.findById(res.rows[0].id, tenantId);
   }
 
+  /**
+   * What packing measured for an order: total weight, box count, and the
+   * tracking number the packer recorded. The courier prices on these, so a
+   * shipment created after packing inherits them instead of asking a dispatcher
+   * to weigh a sealed box a second time.
+   */
+  async findPackingTotals(tenantId: string, soId: string): Promise<{
+    weightKg: number | null;
+    packageCount: number;
+    carrier: string | null;
+    trackingNumber: string | null;
+  } | null> {
+    const res = await this.db.query(
+      `SELECT ps.carrier,
+              ps.tracking_number,
+              COUNT(pp.id)::int AS package_count,
+              COALESCE(SUM(pp.weight_kg), 0) AS weight_kg
+         FROM packing_sessions ps
+         LEFT JOIN packing_packages pp ON pp.packing_session_id = ps.id
+        WHERE ps.tenant_id = $1 AND ps.so_id = $2 AND ps.status <> 'cancelled'
+        GROUP BY ps.id, ps.carrier, ps.tracking_number
+        LIMIT 1`,
+      [tenantId, soId],
+    );
+    const r = res.rows[0];
+    if (!r) return null;
+    const weight = Number(r.weight_kg);
+    return {
+      weightKg: weight > 0 ? weight : null,
+      packageCount: r.package_count ?? 0,
+      carrier: r.carrier ?? null,
+      trackingNumber: r.tracking_number ?? null,
+    };
+  }
+
   async update(id: string, tenantId: string, dto: any): Promise<any> {
     const updates: string[] = []; const params: any[] = []; let idx = 1;
     const fieldMap: Record<string, string> = {

@@ -220,7 +220,9 @@ function CreateShipmentDialog({ open, onOpenChange }: any) {
     notes: '',
   });
 
-  const { data: ordersData } = useSalesOrders({ page: 0, limit: 100, status: 'confirmed' });
+  // Only packed orders can be dispatched — a shipment booked before packing has
+  // no weight or box dimensions, which is exactly what the courier prices on.
+  const { data: ordersData } = useSalesOrders({ page: 0, limit: 100, status: 'ready_for_dispatch' });
   const { data: warehouses } = useWarehouses();
   const createShipment = useCreateShipment();
 

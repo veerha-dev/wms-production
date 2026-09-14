@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Card } from '@/shared/components/ui/card';
 import { Button } from '@/shared/components/ui/button';
 import { useAuth } from '@/shared/contexts/AuthContext';
-import { Boxes, ClipboardList, ScanLine, LogOut, ListChecks } from 'lucide-react';
+import { Boxes, ClipboardList, ScanLine, LogOut, ListChecks, PackageCheck } from 'lucide-react';
 
 export default function MobileHomePage() {
   const { user, signOut } = useAuth();
@@ -22,6 +22,7 @@ export default function MobileHomePage() {
         <div className="grid gap-3">
           <ActionTile to="/m/putaway" icon={Boxes} title="Putaway" subtitle="Scan bin to confirm placement" />
           <ActionTile to="/m/pick" icon={ListChecks} title="Pick" subtitle="Scan SKU to record picks" />
+          <ActionTile to="/m/pack" icon={PackageCheck} title="Pack" subtitle="Scan items into the box and weigh it" />
           <ActionTile to="/m/cycle-count" icon={ClipboardList} title="Cycle Count" subtitle="Scan bins and record physical counts" />
         </div>
       </div>
