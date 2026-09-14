@@ -62,7 +62,9 @@ export class PickListsController {
 
   @Post(':id/pick/:itemId')
   @HttpCode(HttpStatus.OK)
-  async pickItem(@Param('id') id: string, @Param('itemId') itemId: string, @Body() body: { quantityPicked: number }) { return { success: true, data: { id, itemId, quantityPicked: body.quantityPicked } }; }
+  async pickItem(@Param('id') id: string, @Param('itemId') itemId: string, @Body() body: { quantityPicked: number }) {
+    return { success: true, data: await this.service.setItemPicked(id, itemId, body.quantityPicked) };
+  }
 
   @Post(':id/scan-item')
   @HttpCode(HttpStatus.OK)

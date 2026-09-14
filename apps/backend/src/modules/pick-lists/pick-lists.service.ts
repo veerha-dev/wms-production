@@ -184,15 +184,73 @@ export class PickListsService {
   }
 
   /**
+   * Manual entry: a picker types (or a wedge scanner injects) the quantity
+   * actually picked for one line, instead of the label-scan flow in
+   * scanItem(). Capped at quantityRequired — the same "can't physically pick
+   * more than was asked" rule packing enforces on the box side.
+   */
+  async setItemPicked(pickListId: string, itemId: string, quantityPicked: number) {
+    if (quantityPicked < 0) throw new BadRequestException('quantityPicked cannot be negative');
+    const tenantId = getCurrentTenantId();
+    const db = (this.repository as any).db;
+
+    const itemRes = await db.query(
+      `SELECT pli.id, pli.quantity_required, pli.quantity_picked
+         FROM pick_list_items pli
+         JOIN pick_lists pl ON pli.pick_list_id = pl.id
+        WHERE pli.id = $1 AND pli.pick_list_id = $2 AND pl.tenant_id = $3`,
+      [itemId, pickListId, tenantId],
+    );
+    const item = itemRes.rows[0];
+    if (!item) throw new NotFoundException(`Pick list item ${itemId} not found`);
+
+    const capped = Math.min(quantityPicked, item.quantity_required);
+    const newStatus = capped >= item.quantity_required ? 'completed' : capped > 0 ? 'in_progress' : 'pending';
+
+    await db.query(
+      `UPDATE pick_list_items SET quantity_picked = $1, status = $2 WHERE id = $3`,
+      [capped, newStatus, itemId],
+    );
+    await db.query(
+      `UPDATE pick_lists SET status = 'in_progress', started_at = COALESCE(started_at, NOW()), updated_at = NOW()
+        WHERE id = $1 AND tenant_id = $2 AND status IN ('pending', 'assigned')`,
+      [pickListId, tenantId],
+    );
+    await this.markOrdersPicking(tenantId, pickListId);
+
+    return { id: itemId, pickListId, quantityPicked: capped, quantityRequired: item.quantity_required, status: newStatus };
+  }
+
+  /**
    * Completing a pick list is what tells the warehouse manager the order is
    * ready to pack, so it is its own method rather than a bare status write:
    * the manager of THAT warehouse gets notified once the state change has
    * actually landed. `warehouseId` is passed on purpose — without it the
    * engine notifies no manager at all (notifications.service, resolveRecipients).
+   *
+   * Refuses to complete while any line is still short of what it asked for —
+   * without this gate a pick list could finish with nothing actually picked,
+   * and the order would still get handed to packing empty (the bug that shipped
+   * before this check existed).
    */
   async complete(id: string, user?: AuthUser) {
     const tenantId = getCurrentTenantId();
     const pickList = await this.findOne(id);
+
+    const db = (this.repository as any).db;
+    const shortRes = await db.query(
+      `SELECT COUNT(*)::int AS short_count
+         FROM pick_list_items pli
+        WHERE pli.pick_list_id = $1 AND pli.quantity_picked < pli.quantity_required`,
+      [id],
+    );
+    const shortCount = shortRes.rows[0]?.short_count ?? 0;
+    if (shortCount > 0) {
+      throw new BadRequestException(
+        `${shortCount} item(s) on this pick list are not fully picked yet. Pick everything before completing.`,
+      );
+    }
+
     const updated = await this.repository.updateStatus(id, tenantId, 'completed', {
       completedAt: new Date(),
     });
