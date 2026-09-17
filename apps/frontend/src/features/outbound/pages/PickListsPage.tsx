@@ -358,8 +358,8 @@ function PickingExecutionDialog({ pickListId, open, onOpenChange }: any) {
     startPicking.mutate(pickListId);
   };
 
-  const handleRecordPick = (itemId: string, quantity: number, binId: string, skuId: string) => {
-    recordPick.mutate({ itemId, quantity, binId, skuId });
+  const handleRecordPick = (itemId: string, quantity: number) => {
+    recordPick.mutate({ id: pickListId, itemId, quantityPicked: quantity });
   };
 
   const handleComplete = () => {
@@ -455,7 +455,7 @@ function PickListItemRow({ item, isPending, isCompleted, onRecordPick }: any) {
   const [pickedQty, setPickedQty] = useState(item.picked_quantity || 0);
 
   const handlePick = () => {
-    onRecordPick(item.id, pickedQty, item.bin_id, item.sku_id);
+    onRecordPick(item.id, pickedQty);
   };
 
   return (
@@ -483,17 +483,17 @@ function PickListItemRow({ item, isPending, isCompleted, onRecordPick }: any) {
           max={item.required_quantity}
           value={pickedQty}
           onChange={(e) => setPickedQty(parseInt(e.target.value) || 0)}
-          disabled={isPending || isCompleted || item.status === 'picked'}
+          disabled={isPending || isCompleted || item.status === 'completed'}
           className="w-20"
         />
       </TableCell>
       <TableCell>
-        <Badge variant={item.status === 'picked' ? 'default' : item.status === 'short' ? 'destructive' : 'secondary'}>
+        <Badge variant={item.status === 'completed' ? 'default' : item.status === 'in_progress' ? 'secondary' : 'outline'}>
           {item.status}
         </Badge>
       </TableCell>
       <TableCell>
-        {!isPending && !isCompleted && item.status === 'pending' && (
+        {!isPending && !isCompleted && item.status !== 'completed' && (
           <Button size="sm" onClick={handlePick}>
             Mark Picked
           </Button>
