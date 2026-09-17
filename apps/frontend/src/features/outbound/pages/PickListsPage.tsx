@@ -164,9 +164,9 @@ export default function PickListsPage() {
                     <TableCell>{getStatusBadge(pickList.status)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Progress value={((pickList.picked_items || pickList._count?.items || 0) / Math.max(1, pickList.total_items || pickList._count?.items || 1)) * 100} className="w-20" />
+                        <Progress value={((pickList.totalPicked || 0) / Math.max(1, pickList.totalRequired || pickList.itemCount || 1)) * 100} className="w-20" />
                         <span className="text-sm text-muted-foreground">
-                          {pickList.picked_items || 0}/{pickList.total_items || pickList._count?.items || 0}
+                          {pickList.totalPicked || 0}/{pickList.totalRequired || 0}
                         </span>
                       </div>
                     </TableCell>
@@ -382,8 +382,8 @@ function PickingExecutionDialog({ pickListId, open, onOpenChange }: any) {
 
   const isPending = pickList?.status === 'pending';
   const isCompleted = pickList?.status === 'completed';
-  const totalItems = pickList?.total_items || pickList?.items?.length || 0;
-  const pickedItems = pickList?.picked_items || 0;
+  const totalItems = pickList?.totalRequired || pickList?.items?.length || 0;
+  const pickedItems = pickList?.totalPicked || 0;
   const progress = totalItems > 0 ? (pickedItems / totalItems) * 100 : 0;
 
   return (
@@ -452,7 +452,7 @@ function PickingExecutionDialog({ pickListId, open, onOpenChange }: any) {
 }
 
 function PickListItemRow({ item, isPending, isCompleted, onRecordPick }: any) {
-  const [pickedQty, setPickedQty] = useState(item.picked_quantity || 0);
+  const [pickedQty, setPickedQty] = useState(item.quantityPicked || 0);
 
   const handlePick = () => {
     onRecordPick(item.id, pickedQty);
@@ -480,7 +480,7 @@ function PickListItemRow({ item, isPending, isCompleted, onRecordPick }: any) {
         <Input
           type="number"
           min="0"
-          max={item.required_quantity}
+          max={item.quantityRequired}
           value={pickedQty}
           onChange={(e) => setPickedQty(parseInt(e.target.value) || 0)}
           disabled={isPending || isCompleted || item.status === 'completed'}

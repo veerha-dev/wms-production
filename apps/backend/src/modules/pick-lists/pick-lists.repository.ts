@@ -72,6 +72,11 @@ export class PickListsRepository {
       quantityPicked: parseInt(r.quantity_picked, 10),
       status: r.status,
     }));
+    // findAll's list query gets these via subqueries; here the items are
+    // already in hand, so summing them avoids two more round trips.
+    pl.itemCount = pl.items.length;
+    pl.totalRequired = pl.items.reduce((sum: number, i: any) => sum + i.quantityRequired, 0);
+    pl.totalPicked = pl.items.reduce((sum: number, i: any) => sum + i.quantityPicked, 0);
     return pl;
   }
 

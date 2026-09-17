@@ -333,21 +333,9 @@ function PackingWorkbench({
                         {isComplete || !item.id ? (
                           <span className="tabular-nums">{item.packedQuantity}</span>
                         ) : (
-                          <Input
-                            type="number"
-                            min={0}
-                            max={item.pickedQuantity}
-                            value={item.packedQuantity}
-                            aria-label={`Packed quantity for ${item.skuCode}`}
-                            className="ml-auto h-9 w-20 text-right tabular-nums"
-                            onChange={(e) => {
-                              const next = Number(e.target.value);
-                              if (!Number.isFinite(next)) return;
-                              setQuantity.mutate({
-                                itemId: item.id as string,
-                                quantity: Math.max(0, Math.min(next, item.pickedQuantity)),
-                              });
-                            }}
+                          <PackedQuantityInput
+                            item={item as { id: string; skuCode: string; packedQuantity: number; pickedQuantity: number }}
+                            onCommit={(quantity) => setQuantity.mutate({ itemId: item.id as string, quantity })}
                           />
                         )}
                       </TableCell>
@@ -459,6 +447,53 @@ function PackingWorkbench({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/*
+ * Every keystroke and every click of the number input's native spinner
+ * fired its own save-and-refetch with no debounce — on Render's network
+ * latency that meant a request queued per click, the field visibly
+ * fighting the packer, and Complete Packing hanging while the backlog
+ * drained (it waits for pending writes to land first). Debounce locally,
+ * same "commit on blur" pattern the weight field next to it already uses.
+ */
+function PackedQuantityInput({
+  item, onCommit,
+}: {
+  item: { id: string; skuCode: string; packedQuantity: number; pickedQuantity: number };
+  onCommit: (quantity: number) => void;
+}) {
+  const [value, setValue] = useState(item.packedQuantity);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => setValue(item.packedQuantity), [item.packedQuantity]);
+
+  const schedule = (next: number) => {
+    const clamped = Math.max(0, Math.min(next, item.pickedQuantity));
+    setValue(clamped);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => onCommit(clamped), 400);
+  };
+
+  return (
+    <Input
+      type="number"
+      min={0}
+      max={item.pickedQuantity}
+      value={value}
+      aria-label={`Packed quantity for ${item.skuCode}`}
+      className="ml-auto h-9 w-20 text-right tabular-nums"
+      onChange={(e) => {
+        const next = Number(e.target.value);
+        if (!Number.isFinite(next)) return;
+        schedule(next);
+      }}
+      onBlur={() => {
+        if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+        onCommit(value);
+      }}
+    />
   );
 }
 
